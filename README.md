@@ -1,203 +1,90 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hiveton H5000M • ImmortalWrt 鼎桥5G定制固件</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Inter:wght@400;600&display=swap');
-        
-        body {
-            font-family: 'Noto Sans SC', system-ui, sans-serif;
-        }
-        .hero-bg {
-            background: linear-gradient(rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.92)), 
-                        url('https://files.seeusercontent.com/2026/06/29/uu4H/bg1.jpg') center/cover no-repeat fixed;
-        }
-        .glass {
-            background: rgba(255,255,255,0.07);
-            backdrop-filter: blur(16px);
-        }
-        .card-hover {
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .card-hover:hover {
-            transform: translateY(-10px);
-        }
-    </style>
-</head>
-<body class="bg-slate-950 text-slate-200">
-    <!-- Nav -->
-    <nav class="bg-slate-900/95 backdrop-blur-lg border-b border-slate-700 sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-            <div class="flex items-center gap-3">
-                <div class="w-9 h-9 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-2xl flex items-center justify-center text-2xl">📡</div>
-                <div class="font-bold text-2xl tracking-tight">H5000M</div>
-            </div>
-            <div class="flex items-center gap-8 text-sm md:text-base">
-                <a href="#features" class="hover:text-cyan-400 transition">特性</a>
-                <a href="#plugins" class="hover:text-cyan-400 transition">插件</a>
-                <a href="#download" class="hover:text-cyan-400 transition">下载</a>
-            </div>
-        </div>
-    </nav>
+<div align="center">
 
-    <!-- Hero -->
-    <header class="hero-bg min-h-screen flex items-center">
-        <div class="max-w-7xl mx-auto px-6 py-20">
-            <div class="max-w-2xl">
-                <div class="inline-flex items-center gap-2 bg-white/10 px-5 py-2 rounded-3xl text-sm mb-8">
-                    <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                    每日北京时间 05:00 自动编译
-                </div>
-                
-                <h1 class="text-5xl sm:text-6xl md:text-7xl font-bold leading-none tracking-tighter mb-6">
-                    Hiveton H5000M<br>
-                    <span class="text-cyan-300">鼎桥 MT5700M 定制固件</span>
-                </h1>
-                
-                <p class="text-lg md:text-xl text-slate-300 mb-10">
-                    基于 ImmortalWrt 主线 • 完美支持 5G CPE • 智能温控 • Wi-Fi 7
-                </p>
+# 🚀 Hiveton H5000M (MT5700M) 定制固件说明书
 
-                <div class="flex flex-col sm:flex-row gap-4">
-                    <a href="#download" 
-                       class="flex-1 sm:flex-none bg-white text-slate-900 font-semibold text-lg px-8 py-5 rounded-3xl flex items-center justify-center gap-3 hover:bg-cyan-300 transition">
-                        <i class="fas fa-download"></i>
-                        <span>GitHub 下载</span>
-                    </a>
-                    <a href="https://gh.acg2.mom/https://github.com/LianXia233/OpenWRT-CI-H5000M/releases/latest" target="_blank"
-                       class="flex-1 sm:flex-none bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold text-lg px-8 py-5 rounded-3xl flex items-center justify-center gap-3 hover:brightness-110 transition">
-                        <i class="fas fa-bolt"></i>
-                        <span>国内镜像下载</span>
-                    </a>
-                </div>
-            </div>
-        </div>
-    </header>
+*基于 ImmortalWrt 主线源码，专为联发科 Filogic 平台 5G CPE 打造的定制化编译配置与模组解析*
 
-    <!-- Visitor Info -->
-    <div class="bg-slate-900 py-4 border-b border-slate-700 text-sm">
-        <div class="max-w-7xl mx-auto px-6 flex flex-wrap gap-6 justify-between items-center">
-            <div>您的网络信息：</div>
-            <div class="flex flex-wrap gap-x-8 gap-y-2">
-                <span>IPv4: <span id="v4" class="font-mono text-cyan-400">加载中...</span></span>
-                <span>IPv6: <span id="v6" class="font-mono text-cyan-400">加载中...</span></span>
-                <span>ASN: <span id="asn" class="font-mono text-cyan-400">加载中...</span></span>
-                <span id="time" class="font-mono text-emerald-400"></span>
-            </div>
-        </div>
-    </div>
+</div>
 
-    <!-- Features -->
-    <section id="features" class="py-20 md:py-28 bg-slate-950">
-        <div class="max-w-7xl mx-auto px-6">
-            <h2 class="text-4xl md:text-5xl font-bold text-center mb-16">核心硬件特性</h2>
-            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-5xl mb-6">🏗️</div>
-                    <h3 class="text-xl md:text-2xl font-semibold mb-3">ImmortalWrt 主线</h3>
-                    <p class="text-slate-400 text-[15px]">最新源码 + 硬件加速</p>
-                </div>
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-5xl mb-6">📶</div>
-                    <h3 class="text-xl md:text-2xl font-semibold mb-3">鼎桥 MT5700M</h3>
-                    <p class="text-slate-400 text-[15px]">5G 模组深度适配</p>
-                </div>
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-5xl mb-6">❄️</div>
-                    <h3 class="text-xl md:text-2xl font-semibold mb-3">智能风扇</h3>
-                    <p class="text-slate-400 text-[15px]">温度自动调节</p>
-                </div>
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-5xl mb-6">⚡</div>
-                    <h3 class="text-xl md:text-2xl font-semibold mb-3">2.5G + Wi-Fi 7</h3>
-                    <p class="text-slate-400 text-[15px]">高性能网络</p>
-                </div>
-            </div>
-        </div>
-    </section>
+<br>
 
-    <!-- Plugins -->
-    <section id="plugins" class="py-20 md:py-28 bg-slate-900">
-        <div class="max-w-7xl mx-auto px-6">
-            <h2 class="text-4xl md:text-5xl font-bold text-center mb-4">鼎桥 MT5700M 专属插件</h2>
-            <p class="text-center text-slate-400 mb-12">FAN789 社区开发</p>
-            
-            <div class="grid md:grid-cols-3 gap-8">
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-6xl mb-6">📡</div>
-                    <h3 class="text-2xl font-bold mb-3">luci-app-mt5700m</h3>
-                    <p class="text-slate-400">信号监控 · 拨号 · AT指令 · 短信</p>
-                </div>
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-6xl mb-6">🌬️</div>
-                    <h3 class="text-2xl font-bold mb-3">luci-app-h5000m-fancontrol</h3>
-                    <p class="text-slate-400">智能温控 · PWM 调速</p>
-                </div>
-                <div class="glass border border-white/10 rounded-3xl p-8 card-hover">
-                    <div class="text-6xl mb-6">🔄</div>
-                    <h3 class="text-2xl font-bold mb-3">luci-app-h5000m-netmode</h3>
-                    <p class="text-slate-400">5G / 有线 / 负载均衡切换</p>
-                </div>
-            </div>
-        </div>
-    </section>
+## 💖 鸣谢与致敬
 
-    <!-- Download -->
-    <section id="download" class="py-24 md:py-32 bg-gradient-to-b from-slate-900 to-black">
-        <div class="max-w-4xl mx-auto px-6 text-center">
-            <h2 class="text-4xl md:text-6xl font-bold mb-6">下载最新固件</h2>
-            <p class="text-lg md:text-xl text-emerald-400 mb-12">每日北京时间 05:00 自动构建 · 历史版本自动清理</p>
-            
-            <div class="grid sm:grid-cols-2 gap-6 max-w-xl mx-auto">
-                <a href="https://github.com/LianXia233/OpenWRT-CI-H5000M/releases/latest" target="_blank"
-                   class="bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-3xl p-8 md:p-10 flex items-center gap-5 group">
-                    <i class="fab fa-github text-5xl"></i>
-                    <div class="text-left">
-                        <div class="text-xl md:text-2xl font-semibold">GitHub 下载</div>
-                        <div class="text-slate-400 text-sm">国际线路</div>
-                    </div>
-                </a>
-                
-                <a href="https://gh.acg2.mom/https://github.com/LianXia233/OpenWRT-CI-H5000M/releases/latest" target="_blank"
-                   class="bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 rounded-3xl p-8 md:p-10 flex items-center gap-5 group font-medium">
-                    <i class="fas fa-bolt text-5xl"></i>
-                    <div class="text-left">
-                        <div class="text-xl md:text-2xl font-semibold">国内镜像下载</div>
-                        <div class="text-sm opacity-80">推荐国内用户</div>
-                    </div>
-                </a>
-            </div>
-        </div>
-    </section>
+本固件的高效自动化编译、底层系统的稳定性以及对特定 5G 模组的完美适配，离不开开源社区开发者的无私奉献。在此特别感谢以下作者及其开源项目：
 
-    <footer class="bg-black py-12 text-center text-slate-500 text-sm">
-        © 2026 LianXia233 • 个人学习项目
-    </footer>
+> **🐧 源码上游：[ImmortalWrt](https://github.com/immortalwrt/immortalwrt/)**
+> 
+> 感谢 ImmortalWrt 团队提供的最新主线源码。其卓越的路由性能和丰富的本地化特性，为固件的开发提供了无比坚实的底层源码基础。
+> * 🔗 **项目链接**：[immortalwrt/immortalwrt](https://github.com/immortalwrt/immortalwrt/)
 
-    <script>
-        // 北京时间
-        function updateTime() {
-            setInterval(() => {
-                const time = new Date().toLocaleString('zh-CN', { 
-                    timeZone: 'Asia/Shanghai',
-                    hour12: false 
-                }).replace(/\//g, '-');
-                document.getElementById('time').textContent = time + ' 北京';
-            }, 1000);
-        }
-        updateTime();
+> **👤 基础底包、插件优化与编译框架：[VIKINGYFY](https://github.com/VIKINGYFY)**
+> 
+> 感谢作者提供的 OpenWRT-CI 项目。作者不仅打造了高效的云端自动化编译框架，更为本项目提供了稳定可靠的**基础底包固件配置**、**深度的插件细节优化**，以及**大量优质实用的额外插件支持**，极大降低了固件定制门槛并全面提升了路由器的整体体验和可玩性。
+> * 🔗 **项目链接**：[OpenWRT-CI](https://github.com/VIKINGYFY/OpenWRT-CI)
 
-        // 访客 IP 信息
-        async function getVisitorInfo() {
-            try {
-                const res = await fetch('https://ipapi.co/json/');
-                const d = await res.json();
-                document.getElementById('v4').textContent = d.ip || 'N/A';
-                document.getElementById('v6').textContent = d.ipv6 || '未检测';
+> **👤 CPE 核心插件支持：[FAN789](https://github.com/FAN789)**
+> 
+> 感谢作者为 Hiveton H5000M 及 MT5700M 模组开发的系列核心控制插件，赋予了该设备真正的 5G CPE 灵魂。
+> * 🔗 **主页链接**：[https://github.com/FAN789](https://github.com/FAN789)
+> * 📦 **5G 模组控制**：[luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)
+> * ❄️ **智能风扇温控**：[luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol)
+> * 🔀 **网络模式切换**：[luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode)
+
+---
+
+## 📡 一、 硬件平台与固件底层概述
+
+**Hiveton H5000M** 是一款高性能的 5G CPE（Customer Premises Equipment）路由器，致力于将高速的 5G 移动网络转化为稳定可靠的局域网 Wi-Fi 或有线网络。
+
+| 核心特征 | 详情描述 |
+| :--- | :--- |
+| 🏗️ **固件底包** | **基于 ImmortalWrt 主线最新源码构建**。内核层面已开启硬件加解密优化（`kmod-cryptodev`, `kmod-tls`），为科学分流和安全组网提供底层加速。 |
+| 🖥️ **基础架构** | 采用 **联发科 (MediaTek) Filogic** 平台 (如 MT7986 系列)，具备强大的网络数据转发能力与 Wi-Fi 7 性能。 |
+| 📶 **核心模组** | 深度集成 **MT5700M 5G 模组**，支持直接插卡上网，实现 5G 高速蜂窝接入。 |
+| ❄️ **散热设计** | 针对 5G 模组高负载下的发热特性，设备配备了**主动散热风扇**，专为高负载网络转化设计，确保极限性能下不降频。 |
+
+---
+
+## 🧩 二、 核心专属插件详解
+
+固件深度整合了 FAN789 提供的定制插件，完美释放 Hiveton H5000M 的 5G 硬件潜力。以下是三大核心插件的功能剖析：
+
+### 1. MT5700M 5G 模组支持 (`luci-app-mt5700m`)
+MT5700M 是本台 CPE 的数据吞吐核心，该插件为其提供了系统级驱动支持与直观的图形化管理界面 (LuCI)。
+
+* **📊 状态监控**：在后台实时呈现 5G 信号强度、SA/NSA 网络制式、当前频段、运营商及 IMEI/IMSI 等关键状态。
+* **🔌 连接管理**：兼容 QMI/NCM 等多种拨号协议，实现高速稳定的蜂窝联网。
+* **⚙️ AT 指令交互**：内置 `ubus-at-daemon`，支持通过 Web 界面向模组发送 AT 指令，便于进行高级网络调试或频段锁定。
+* **✉️ 短信功能**：集成 `sms-tool`，支持通过路由器后台接收与发送运营商短信，方便接收流量提醒。
+
+### 2. 硬件级风扇温控 (`luci-app-h5000m-fancontrol`)
+5G 高速传输伴随显著发热，该插件确保了设备在满负荷运作下的温控稳定。
+
+* **🌡️ 智能监测**：实时读取 CPU 和 MT5700M 模组的双路温度传感器数据。
+* **🌀 多档调速**：根据设定的温度阈值（如阈值 A、B、C），自动调节风扇的 PWM 转速百分比，兼顾低负载静音与高负载散热。
+* **🛠️ 自定义配置**：用户可自由调整启动温度、目标温度，打造个性化的散热策略。
+
+### 3. 网络模式无缝切换 (`luci-app-h5000m-netmode`)
+应对复杂的网络接入环境（5G 蜂窝与传统有线宽带双接入），提供极简的管理体验。
+
+* **🔄 一键切换**：支持在“仅 5G 模式”、“仅有线宽带模式”及“负载均衡/故障转移模式”间快速切换，告别复杂的接口配置。
+* **⚡ 链路检测**：搭配 mwan3，实时监测链路连通状态，主链路故障时实现毫秒级无缝切换，确保网络永不掉线。
+
+---
+
+## 🛠️ 三、 固件底层组件与扩展支持
+
+得益于 ImmortalWrt 优秀的底包基础，Hiveton H5000M 不仅具备卓越的基础路由性能，还将扩展性推向极致：
+
+* **内核级加解密加速**：开启 `kmod-cryptodev` 与 `kmod-tls`，大幅提升代理工具（如 HomeProxy、OpenClash）和加密隧道的吞吐量，降低 CPU 占用。
+* **USB 驱动栈扩展**：包含 `kmod-usb-core`, `kmod-usb3` 及 `kmod-usb-net-qmi-wwan` 等丰富驱动，确保系统准确识别各类移动通信模组。
+* **轻量级 NAS 存储**：支持 NVMe 固态硬盘（`kmod-nvme`）挂载，结合 BTRFS 文件系统与 Samba4 共享，轻松打造家庭数据中心。
+* **安全异地组网**：内置 EasyTier、Tailscale 等主流 SD-WAN 工具，轻松实现内网设备的远程安全访问。
+
+<br>
+
+> 📅 *文档更新日期：2026年7月*
+> 💡 *本说明文档由项目编译配置与社区开源信息整合生成。*yId('v6').textContent = d.ipv6 || '未检测';
                 document.getElementById('asn').textContent = d.asn ? `AS${d.asn}` : 'N/A';
             } catch(e) {}
         }
