@@ -3,323 +3,300 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Hiveton H5000M 鼎桥 MT5700M 5G CPE 定制 ImmortalWrt 固件 - 每日自动构建，完美支持 5G + Wi-Fi 7 + 智能温控">
+    <meta name="keywords" content="H5000M, ImmortalWrt, 鼎桥 MT5700M, OpenWrt, 5G CPE, 路由器固件">
     <title>Hiveton H5000M • ImmortalWrt 鼎桥5G定制固件</title>
+    
+    <!-- 预加载关键资源 -->
+    <link rel="preload" href="https://cdn.tailwindcss.com" as="script">
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" as="style">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-        
+
         :root {
-            var(--bg-base): #020617; /* Slate 950 底色 */
+            --bg-base: #020617;
+            --accent-cyan: #22d3ee;
+            --accent-blue: #3b82f6;
         }
 
-        body { 
-            font-family: 'Noto Sans SC', system-ui, sans-serif; 
+        body {
+            font-family: 'Noto Sans SC', system-ui, sans-serif;
             background-color: var(--bg-base);
             -webkit-font-smoothing: antialiased;
         }
 
-        .font-mono {
-            font-family: 'JetBrains Mono', monospace;
-        }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
 
-        /* 恢复并优化的全局背景图 */
         .custom-bg {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
+            inset: 0;
             background: url('https://files.seeusercontent.com/2026/06/29/uu4H/bg1.jpg') center/cover no-repeat;
-            opacity: 0.25; /* 暗调叠加透明度，兼顾图片展示和文字阅读 */
-            z-index: -1;
+            opacity: 0.22;
+            z-index: -2;
             pointer-events: none;
         }
-        
-        /* 极致轻薄的毛玻璃卡片 */
+
         .glass-card {
-            background: linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+            background: linear-gradient(145deg, rgba(255,255,255,0.035) 0%, rgba(255,255,255,0.008) 100%);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 4px 24px -8px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 30px -8px rgba(0,0,0,0.6);
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        
-        .glass-card:hover { 
-            transform: translateY(-4px); 
-            background: linear-gradient(145deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
-            border-color: rgba(34, 211, 238, 0.3);
-            box-shadow: 0 20px 40px -16px rgba(34, 211, 238, 0.15);
+
+        .glass-card:hover {
+            transform: translateY(-6px);
+            background: linear-gradient(145deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.015) 100%);
+            border-color: rgba(34, 211, 238, 0.35);
+            box-shadow: 0 25px 50px -12px rgba(34, 211, 238, 0.18);
         }
 
-        /* 呼吸光晕背景 */
         .ambient-glow {
             position: absolute;
-            width: 60vw;
-            height: 60vw;
-            max-width: 600px;
-            max-height: 600px;
-            background: radial-gradient(circle, rgba(6,182,212,0.2) 0%, rgba(0,0,0,0) 70%);
+            width: 640px;
+            height: 640px;
+            background: radial-gradient(circle, rgba(34,211,238,0.18) 0%, transparent 70%);
             border-radius: 50%;
-            pointer-events: none;
-            z-index: 0;
-            top: -10%;
+            top: -15%;
             left: 50%;
             transform: translateX(-50%);
-            animation: pulse-glow 8s ease-in-out infinite alternate;
+            animation: pulse-glow 12s ease-in-out infinite alternate;
+            z-index: -1;
+            pointer-events: none;
         }
 
         @keyframes pulse-glow {
-            0% { opacity: 0.6; transform: translateX(-50%) scale(0.95); }
-            100% { opacity: 1; transform: translateX(-50%) scale(1.05); }
+            0% { opacity: 0.55; transform: translateX(-50%) scale(0.92); }
+            100% { opacity: 0.95; transform: translateX(-50%) scale(1.08); }
         }
 
-        /* 渐变文字 */
         .text-gradient {
-            background-clip: text;
+            background: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-image: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
         }
+
         .text-gradient-cyan {
-            background-clip: text;
+            background: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-image: linear-gradient(135deg, #22d3ee 0%, #3b82f6 100%);
+        }
+
+        .hero-btn {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .hero-btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            transform: translateX(-150%);
+            transition: transform 0.6s;
+        }
+        
+        .hero-btn:hover::after {
+            transform: translateX(300%);
         }
     </style>
 </head>
 <body class="text-slate-200 selection:bg-cyan-500/30 selection:text-white relative overflow-x-hidden">
-    
-    <!-- 全局背景图 -->
+    <!-- 背景 -->
     <div class="custom-bg"></div>
-
-    <!-- 环境光背景 -->
     <div class="ambient-glow"></div>
 
-    <!-- 顶部导航 -->
-    <nav class="fixed top-0 w-full bg-slate-950/60 backdrop-blur-xl border-b border-white/10 z-50 transition-all">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
-            <!-- Logo -->
+    <!-- 导航 -->
+    <nav class="fixed top-0 w-full bg-slate-950/70 backdrop-blur-xl border-b border-white/10 z-50">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
             <a href="#" class="flex items-center gap-3 group">
-                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 group-hover:shadow-cyan-500/40 transition-all">
-                    <i class="fas fa-wifi text-white text-sm"></i>
+                <div class="w-9 h-9 rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-xl shadow-cyan-500/30 group-hover:scale-110 transition-transform">
+                    <i class="fas fa-wifi text-white text-lg"></i>
                 </div>
-                <span class="font-bold text-xl tracking-tight text-white">H5000M</span>
+                <span class="font-bold text-2xl tracking-tighter">H5000M</span>
             </a>
-            
-            <!-- 桌面端菜单 -->
+
             <div class="hidden md:flex items-center gap-8 text-sm font-medium">
-                <a href="#features" class="text-slate-300 hover:text-cyan-400 transition-colors">硬件特性</a>
-                <a href="#plugins" class="text-slate-300 hover:text-cyan-400 transition-colors">专属插件</a>
+                <a href="#features" class="hover:text-cyan-400 transition-colors">硬件特性</a>
+                <a href="#plugins" class="hover:text-cyan-400 transition-colors">专属插件</a>
             </div>
 
-            <!-- 右侧按钮 (手机电脑均显示，手机端作为唯一入口) -->
-            <a href="#download" class="text-sm font-semibold bg-white text-slate-900 px-5 py-2 rounded-full hover:bg-cyan-300 hover:scale-105 transition-all shadow-[0_0_15px_rgba(255,255,255,0.2)]">
+            <a href="#download" 
+               class="px-6 py-2.5 bg-white text-slate-900 font-semibold rounded-full hover:bg-cyan-300 active:scale-95 transition-all shadow-lg">
                 极速下载
             </a>
         </div>
     </nav>
 
-    <!-- 首屏 Hero 区域 -->
-    <header class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 flex flex-col items-center justify-center text-center px-4 sm:px-6 z-10 min-h-[90vh]">
-        
-        <!-- 标签 -->
-        <div class="inline-flex items-center gap-2.5 bg-white/[0.05] border border-white/10 backdrop-blur-md px-4 py-1.5 rounded-full text-xs sm:text-sm mb-8 text-slate-300 shadow-xl">
-            <span class="relative flex h-2.5 w-2.5">
+    <!-- Hero -->
+    <header class="relative pt-28 pb-20 lg:pt-48 lg:pb-32 flex flex-col items-center justify-center text-center px-6 min-h-[92vh]">
+        <div class="inline-flex items-center gap-2.5 bg-white/5 border border-white/10 backdrop-blur-md px-5 py-2 rounded-3xl text-sm mb-10">
+            <span class="relative flex h-3 w-3">
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
-            <span>每日 05:00 自动执行 CI 编译流水线</span>
+            <span>每日 05:00 自动 CI 构建</span>
         </div>
-        
-        <!-- 大标题 -->
-        <h1 class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight mb-6 leading-tight">
-            <span class="text-gradient drop-shadow-lg">Hiveton H5000M</span><br>
-            <span class="text-gradient-cyan mt-2 block drop-shadow-lg">鼎桥 MT5700M 定制固件</span>
+
+        <h1 class="text-5xl sm:text-6xl lg:text-7xl font-black tracking-tighter leading-none mb-6">
+            <span class="text-gradient">Hiveton H5000M</span><br>
+            <span class="text-gradient-cyan">鼎桥 MT5700M 定制固件</span>
         </h1>
-        
-        <!-- 副标题 -->
-        <p class="text-base sm:text-lg lg:text-xl text-slate-300 mb-10 leading-relaxed max-w-2xl mx-auto font-light drop-shadow">
-            基于 ImmortalWrt 主线深度构建 • 完美驱动 5G CPE 模组<br class="hidden sm:block">
-            内置智能温控与负载均衡 • 释放全血网络性能
+
+        <p class="text-lg text-slate-300 max-w-2xl mx-auto mb-12">
+            基于 ImmortalWrt 主线 • 完美驱动 5G CPE<br class="hidden sm:block">
+            智能温控 + 负载均衡 + Wi-Fi 7 就绪
         </p>
 
-        <!-- 按钮组 -->
-        <div class="flex flex-col sm:flex-row gap-4 w-full sm:w-auto px-4 sm:px-0">
+        <div class="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
             <a href="https://github.com/LianXia233/OpenWRT-CI-H5000M/releases/latest" target="_blank"
-               class="group relative flex items-center justify-center gap-3 bg-cyan-400 text-slate-950 font-bold text-base sm:text-lg px-8 py-4 rounded-2xl overflow-hidden transition-all hover:scale-[1.02] active:scale-95 w-full sm:w-auto shadow-[0_0_30px_rgba(34,211,238,0.3)]">
-                <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out"></div>
-                <i class="fas fa-rocket relative z-10"></i>
-                <span class="relative z-10">获取最新固件</span>
+               class="hero-btn group flex items-center justify-center gap-3 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-lg px-10 py-5 rounded-3xl transition-all active:scale-95 shadow-2xl shadow-cyan-500/30 w-full sm:w-auto">
+                <i class="fas fa-rocket"></i>
+                <span>获取最新固件</span>
             </a>
+            
             <a href="#features" 
-               class="flex items-center justify-center gap-3 bg-slate-900/50 backdrop-blur-md border border-white/10 text-white font-medium text-base sm:text-lg px-8 py-4 rounded-2xl hover:bg-slate-800/80 transition-all w-full sm:w-auto">
-                <span>了解特性</span>
-                <i class="fas fa-arrow-down text-sm opacity-50"></i>
+               class="flex items-center justify-center gap-3 border border-white/20 hover:bg-white/5 backdrop-blur-md font-medium text-lg px-8 py-5 rounded-3xl transition-all w-full sm:w-auto">
+                探索特性
+                <i class="fas fa-arrow-down text-sm"></i>
             </a>
         </div>
     </header>
 
-    <!-- 终端风格时间栏 -->
-    <div class="border-y border-white/10 bg-slate-950/40 backdrop-blur-md py-3 z-10 relative">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 flex justify-center items-center gap-3 text-xs sm:text-sm">
+    <!-- 时间栏 -->
+    <div class="border-y border-white/10 bg-slate-950/60 backdrop-blur-md py-3 sticky top-16 z-40">
+        <div class="max-w-7xl mx-auto px-6 flex justify-center items-center gap-3 text-sm">
             <i class="fas fa-terminal text-slate-400"></i>
-            <span id="time" class="font-mono text-emerald-400/90 tracking-wide drop-shadow-md">正在同步系统时钟...</span>
+            <span id="time" class="font-mono text-emerald-400 tracking-widest"></span>
         </div>
     </div>
 
-    <!-- 核心特性 (Features) -->
-    <section id="features" class="py-20 lg:py-32 relative z-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="text-center mb-16 lg:mb-20">
-                <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 text-white drop-shadow-lg">次世代网络中枢</h2>
-                <p class="text-slate-400 text-sm sm:text-base drop-shadow">为严苛的高性能网络环境量身定制</p>
-            </div>
-            
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-                <!-- Card 1 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col items-start">
-                    <div class="w-12 h-12 rounded-2xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 text-xl mb-6 shadow-[0_0_15px_rgba(59,130,246,0.2)]">
-                        <i class="fas fa-code-branch"></i>
-                    </div>
-                    <h3 class="text-lg sm:text-xl font-bold text-white mb-3">ImmortalWrt 主线</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">保持与上游代码同步，默认集成常用网络组件，完成 IPv6 协议栈深度优化与调校。</p>
-                </div>
-                <!-- Card 2 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col items-start">
-                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-xl mb-6 shadow-[0_0_15px_rgba(34,211,238,0.2)]">
-                        <i class="fas fa-satellite-dish"></i>
-                    </div>
-                    <h3 class="text-lg sm:text-xl font-bold text-white mb-3">鼎桥 MT5700M</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">原生适配 5G 模组底层驱动，完整支持无感拨号、短接指令透传及实时基站状态监控。</p>
-                </div>
-                <!-- Card 3 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col items-start">
-                    <div class="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl mb-6 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
-                        <i class="fas fa-fan"></i>
-                    </div>
-                    <h3 class="text-lg sm:text-xl font-bold text-white mb-3">智能自适应风扇</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">内核级硬件温度监控，支持 PWM 无级平滑调速，在静音体验与极致散热间寻找完美平衡。</p>
-                </div>
-                <!-- Card 4 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col items-start">
-                    <div class="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 text-xl mb-6 shadow-[0_0_15px_rgba(168,85,247,0.2)]">
-                        <i class="fas fa-bolt"></i>
-                    </div>
-                    <h3 class="text-lg sm:text-xl font-bold text-white mb-3">2.5G + Wi-Fi 7</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">彻底释放超千兆内网吞吐能力，EasyMesh 无缝组网就绪，终结大户型全屋漫游痛点。</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- 专属插件 (Plugins) -->
-    <section id="plugins" class="py-20 lg:py-32 relative z-10 bg-white/[0.02] border-y border-white/10 backdrop-blur-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <!-- 特性 -->
+    <section id="features" class="py-24 lg:py-32 relative z-10">
+        <div class="max-w-7xl mx-auto px-6">
             <div class="text-center mb-16">
-                <h2 class="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 text-white drop-shadow-lg">专属插件生态</h2>
-                <p class="text-cyan-400 text-sm sm:text-base font-medium drop-shadow">Powered by FAN789 社区</p>
+                <h2 class="text-4xl lg:text-5xl font-bold mb-4">次世代网络中枢</h2>
+                <p class="text-slate-400">为高性能网络环境而生</p>
             </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- Plugin 1 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col group">
-                    <div class="flex justify-between items-start mb-8">
-                        <div class="text-4xl text-slate-400 group-hover:text-cyan-400 transition-colors duration-300">
-                            <i class="fas fa-tower-cell"></i>
-                        </div>
-                        <span class="text-[10px] sm:text-xs font-mono bg-white/10 border border-white/20 text-slate-200 px-3 py-1 rounded-full backdrop-blur-md">luci-app</span>
-                    </div>
-                    <h3 class="text-xl font-bold text-white mb-3 font-mono">mt5700m</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">提供直观的 WebUI 界面，支持基站信号多维监控、网络频段自主锁定、AT指令下发及短信收发功能。</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div class="glass-card rounded-3xl p-8 flex flex-col">
+                    <div class="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-3xl mb-6">🔀</div>
+                    <h3 class="text-xl font-bold mb-3">ImmortalWrt 主线</h3>
+                    <p class="text-slate-300 text-[15px] leading-relaxed">与上游同步，深度优化 IPv6 协议栈</p>
                 </div>
-                <!-- Plugin 2 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col group">
-                    <div class="flex justify-between items-start mb-8">
-                        <div class="text-4xl text-slate-400 group-hover:text-emerald-400 transition-colors duration-300">
-                            <i class="fas fa-temperature-low"></i>
-                        </div>
-                        <span class="text-[10px] sm:text-xs font-mono bg-white/10 border border-white/20 text-slate-200 px-3 py-1 rounded-full backdrop-blur-md">luci-app</span>
-                    </div>
-                    <h3 class="text-xl font-bold text-white mb-3 font-mono">fancontrol</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">专为 H5000M 硬件底层设计的温控策略面板，支持自定义多级温度阈值与风扇转速百分比曲线映射。</p>
+                
+                <div class="glass-card rounded-3xl p-8 flex flex-col">
+                    <div class="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-3xl mb-6">📡</div>
+                    <h3 class="text-xl font-bold mb-3">鼎桥 MT5700M</h3>
+                    <p class="text-slate-300 text-[15px] leading-relaxed">原生 5G 驱动 + 基站监控 + AT 指令支持</p>
                 </div>
-                <!-- Plugin 3 -->
-                <div class="glass-card rounded-3xl p-6 sm:p-8 flex flex-col group">
-                    <div class="flex justify-between items-start mb-8">
-                        <div class="text-4xl text-slate-400 group-hover:text-purple-400 transition-colors duration-300">
-                            <i class="fas fa-network-wired"></i>
-                        </div>
-                        <span class="text-[10px] sm:text-xs font-mono bg-white/10 border border-white/20 text-slate-200 px-3 py-1 rounded-full backdrop-blur-md">luci-app</span>
-                    </div>
-                    <h3 class="text-xl font-bold text-white mb-3 font-mono">netmode</h3>
-                    <p class="text-slate-300 text-sm leading-relaxed">智能网络调度助手，支持在 5G 移动网络、有线宽带之间实现毫秒级快速切换与复杂的 MWAN3 负载均衡。</p>
+                
+                <div class="glass-card rounded-3xl p-8 flex flex-col">
+                    <div class="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-3xl mb-6">🌬️</div>
+                    <h3 class="text-xl font-bold mb-3">智能风扇控制</h3>
+                    <p class="text-slate-300 text-[15px] leading-relaxed">内核级 PWM 调速，静音与散热完美平衡</p>
+                </div>
+                
+                <div class="glass-card rounded-3xl p-8 flex flex-col">
+                    <div class="w-14 h-14 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-3xl mb-6">⚡</div>
+                    <h3 class="text-xl font-bold mb-3">2.5G + Wi-Fi 7</h3>
+                    <p class="text-slate-300 text-[15px] leading-relaxed">千兆内网 + EasyMesh 全屋漫游</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- 下载行动号召 (CTA) -->
-    <section id="download" class="py-24 lg:py-40 relative z-10 overflow-hidden">
-        <!-- 底部大光晕 -->
-        <div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-full max-w-3xl h-96 bg-cyan-500/20 blur-[100px] rounded-full pointer-events-none"></div>
+    <!-- 插件 -->
+    <section id="plugins" class="py-24 lg:py-32 bg-white/[0.015] border-y border-white/10">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl lg:text-5xl font-bold mb-3">专属插件生态</h2>
+                <p class="text-cyan-400">Powered by FAN789 社区</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="glass-card rounded-3xl p-8 group">
+                    <div class="text-5xl mb-6 text-slate-400 group-hover:text-cyan-400 transition-colors">📶</div>
+                    <h3 class="font-mono text-2xl font-bold mb-2">mt5700m</h3>
+                    <p class="text-slate-300">5G 模组 WebUI 监控 + 频段锁定 + 短信功能</p>
+                </div>
+                
+                <div class="glass-card rounded-3xl p-8 group">
+                    <div class="text-5xl mb-6 text-slate-400 group-hover:text-emerald-400 transition-colors">❄️</div>
+                    <h3 class="font-mono text-2xl font-bold mb-2">fancontrol</h3>
+                    <p class="text-slate-300">自定义温度曲线与风扇转速映射</p>
+                </div>
+                
+                <div class="glass-card rounded-3xl p-8 group">
+                    <div class="text-5xl mb-6 text-slate-400 group-hover:text-purple-400 transition-colors">🔄</div>
+                    <h3 class="font-mono text-2xl font-bold mb-2">netmode</h3>
+                    <p class="text-slate-300">5G / 宽带 毫秒切换 + MWAN3 智能负载均衡</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="download" class="py-28 lg:py-40 relative overflow-hidden">
+        <div class="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-500/10 to-transparent pointer-events-none"></div>
         
-        <div class="max-w-4xl mx-auto px-4 sm:px-6 text-center relative z-10">
-            <h2 class="text-3xl sm:text-5xl lg:text-6xl font-black mb-6 text-white tracking-tight drop-shadow-lg">准备好升级网络了吗？</h2>
-            <p class="text-sm sm:text-base lg:text-lg text-slate-300 mb-10 max-w-2xl mx-auto drop-shadow">
-                固件由 GitHub Actions 每日自动构建，历史版本将定期清理以释放空间。<br class="hidden sm:block">强烈建议您始终下载并刷入最新版本以获得最佳体验。
+        <div class="max-w-4xl mx-auto px-6 text-center relative z-10">
+            <h2 class="text-5xl lg:text-6xl font-black tracking-tighter mb-6">准备好升级你的网络了吗？</h2>
+            <p class="text-slate-300 text-lg mb-10 max-w-xl mx-auto">
+                每日自动构建 · 建议始终使用最新版本
             </p>
             
             <a href="https://github.com/LianXia233/OpenWRT-CI-H5000M/releases/latest" target="_blank"
-               class="group inline-flex items-center justify-center gap-3 bg-white text-slate-900 font-bold text-lg px-10 py-5 rounded-2xl hover:bg-cyan-50 transition-all hover:scale-105 active:scale-95 shadow-[0_0_40px_rgba(255,255,255,0.2)] w-full sm:w-auto">
-                <i class="fab fa-github text-2xl group-hover:rotate-12 transition-transform duration-300"></i>
-                <span>前往 GitHub 下载固件</span>
+               class="inline-flex items-center gap-4 bg-white hover:bg-cyan-50 text-slate-950 font-bold text-xl px-12 py-6 rounded-3xl transition-all active:scale-95 shadow-2xl">
+                <i class="fab fa-github text-3xl"></i>
+                <span>前往 GitHub 下载最新固件</span>
             </a>
         </div>
     </section>
 
-    <!-- 页脚 -->
-    <footer class="bg-black/60 backdrop-blur-xl py-8 border-t border-white/10 relative z-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div class="text-slate-400 text-xs sm:text-sm font-medium flex items-center gap-2">
-                © 2026 LianXia233
-                <span class="w-1 h-1 bg-slate-600 rounded-full hidden sm:block"></span>
-                <span class="hidden sm:inline">OpenWrt Auto-Build Project</span>
+    <!-- Footer -->
+    <footer class="bg-black/70 backdrop-blur-xl py-10 border-t border-white/10">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="text-slate-400 text-sm">
+                © 2026 LianXia233 • OpenWrt Auto-Build Project
             </div>
-            <div class="flex gap-5 text-slate-400">
-                <a href="https://github.com/LianXia233/OpenWRT-CI-H5000M" target="_blank" class="hover:text-white transition-colors p-2 -m-2">
-                    <span class="sr-only">GitHub</span>
-                    <i class="fab fa-github text-xl"></i>
-                </a>
-            </div>
+            <a href="https://github.com/LianXia233/OpenWRT-CI-H5000M" target="_blank" class="text-slate-400 hover:text-white transition-colors">
+                <i class="fab fa-github text-2xl"></i>
+            </a>
         </div>
     </footer>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const timeEl = document.getElementById('time');
-            
-            const renderTime = () => {
-                const now = new Date();
-                const timeString = now.toLocaleString('zh-CN', { 
-                    timeZone: 'Asia/Shanghai', 
-                    hour12: false,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                }).replace(/\//g, '-');
-                
-                timeEl.textContent = `sys_time: ${timeString} [CST]`;
+        // 时间显示
+        function updateTime() {
+            const el = document.getElementById('time');
+            const now = new Date();
+            const options = {
+                timeZone: 'Asia/Shanghai',
+                hour12: false,
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
             };
-
-            renderTime();
-            setInterval(renderTime, 1000);
+            const str = now.toLocaleString('zh-CN', options).replace(/\//g, '-');
+            el.textContent = `sys_time: ${str} [CST]`;
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            updateTime();
+            setInterval(updateTime, 1000);
         });
     </script>
 </body>
