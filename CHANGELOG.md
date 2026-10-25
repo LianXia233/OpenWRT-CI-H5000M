@@ -2,6 +2,65 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-25] 修复机型回退导致编译失败 + 清理 Node 20 弃用告警
+
+### 背景
+
+10-24 凌晨的 MTK-AUTO（run 40140034404，MEDIATEK-WIFI-YES / VIKINGYFY/immortalwrt）
+在「Compile Firmware」失败，耗时 3 小时 37 分。日志显示构建的是
+**OpenWrt One** 而非目标机型 Hiveton H5000M，`hiveton` 关键字在整份日志中出现 0 次。
+
+### 根因
+
+1. **机型静默回退（编译失败主因）**
+   OpenWrt/ImmortalWrt 的「Target Profile」是单选 choice，`scripts/target-metadata.pl`
+   生成两层不同符号：
+   - `MULTI_PROFILE=y`：`Target Devices` 菜单中的
+     `CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_xxx`；
+   - `MULTI_PROFILE=n`：`Target Profile` choice 中的
+     `CONFIG_TARGET_mediatek_filogic_DEVICE_xxx`（无 `DEVICE_` 前缀那一层）。
+
+   `Config/MEDIATEK-WIFI-YES.txt` 在 `MULTI_PROFILE=n` 下只写了
+   `CONFIG_TARGET_DEVICE_...`，该符号此时不可见，`make defconfig` 静默回退到
+   `target/linux/mediatek/filogic/target.mk` 的 `DEFAULT_PROFILE`（filogic 平台为
+   `openwrt_one`），于是编译了 OpenWrt One。该机型出厂镜像依赖 initramfs，而
+   `Config/GENERAL.txt` 中 `CONFIG_TARGET_ROOTFS_INITRAMFS=n`，导致
+   `immortalwrt-mediatek-filogic-openwrt_one-initramfs.itb` 未生成、
+   `ubinize-image.sh` 打包 factory.ubi 时 `stat: cannot statx` 失败，
+   `target/linux failed to build` → `make world` 退出。
+   （2026-10-23 将 `MULTI_PROFILE` 改回 `n` 的改动本身没有错，错在设备配置写的是
+   另一层符号。）
+
+2. **Node 20 弃用告警**：`actions/checkout@v4`、`actions/cache@v4`、
+   `actions/github-script@v7`、`softprops/action-gh-release@v2` 均运行在 Node 20
+   runtime 上，runner 会强制切到 Node 24 并给出弃用告警。
+
+### 修复
+
+- `Config/MEDIATEK-WIFI-YES.txt`：改用单选 choice 符号
+  `CONFIG_TARGET_mediatek_filogic_DEVICE_hiveton_h5000m=y`，并在注释中说明两种
+  符号的区别；同步修正 `Config/GENERAL.txt` 中关于 10-23 那次误判的注释。
+- `.github/workflows/WRT-CORE.yml`：`Custom Settings` 在 `make defconfig` 之后新增
+  目标设备校验——从 `Config/$WRT_CONFIG.txt` 提取设备符号并检查其已进入 `.config`，
+  未生效则立即 `exit 1`。同类配置错误从此在数分钟内失败，而不是数小时后。
+- Node 20 清理（均切换到 Node 24 runtime）：
+  `actions/checkout@v4` → `v7`，`actions/cache@v4` → `v6`，
+  `actions/github-script@v7` → `v9`（脚本仅用 `github.rest`，v9 新增的
+  `getOctokit` 注入函数不影响），`softprops/action-gh-release@v2` → `v3`。
+- `runs-on: ubuntu-latest` → `ubuntu-24.04`（WRT-CORE / Cache-Clean / Auto-Clean）：
+  `ubuntu-latest` 自 2026-10-19 起会迁移到 Ubuntu 26.04，而 immortalwrt 初始化脚本
+  与部分 host 依赖尚未适配，固定镜像保证可复现构建。
+- `actions/checkout` v7 会拦截 fork PR 的 `workflow_run` 检出；本仓库触发方式为
+  `schedule` / `workflow_dispatch` / 同仓库 `workflow_run`，不受影响。
+
+### 验证
+
+- 本地核对 `scripts/target-metadata.pl` 生成的 Kconfig 结构，确认
+  `MULTI_PROFILE=n` 时生效符号不含 `TARGET_DEVICE_` 前缀。
+- 本地核对 `target/linux/mediatek/image/filogic.mk`，确认
+  `Device/hiveton_h5000m` 仅产出 `sysupgrade.bin`（无需 initramfs）。
+- 触发 MTK-AUTO（TEST=true）验证 `Custom Settings` 校验逻辑与配置文件正确性。
+
 ## [2026-10-23] 深度适配 FAN789/luci-app-mt5700m v3.0.3
 
 ### 背景
