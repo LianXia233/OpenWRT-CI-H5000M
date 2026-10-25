@@ -105,12 +105,22 @@ FIX_SINGBOX_STALE_PATCH
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
 # H5000M 硬件配套插件
-# 风扇控制（2026-10-26 起改用 LianXia233/luci-app-h5000m-fancontrol，FAN789
-# 原版 v2.x shell 控制器的 Rust 重写分支）：v3.x 单包内含 LuCI 前端与零依赖
-# Rust 控制器，且内置 at-webserver 温度桥接（每 30s 经 127.0.0.1:8765 RPC 取
-# AT^CHIPTEMP? 峰值写 /var/run/mt5700m/temperature），无需本仓库再注入桥接；
-# Rust 交叉编译适配见下方 PREPARE_FANCONTROL_PREBUILT 与结构校验。
-UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "LianXia233/luci-app-h5000m-fancontrol" "main"
+# 风扇控制按固件分流（2026-10-26；两仓库包名相同，同一 package 树只能存在一套，
+# 每个矩阵作业只 clone 对应那套）：
+#   MT5700 固件（新模组插件）→ LianXia233/luci-app-h5000m-fancontrol（FAN789
+#     原版 v2.x shell 控制器的 Rust 重写分支）：v3.x 单包内含 LuCI 前端与零依赖
+#     Rust 控制器，且内置 at-webserver 温度桥接（每 30s 经 127.0.0.1:8765 RPC 取
+#     AT^CHIPTEMP? 峰值写 /var/run/mt5700m/temperature）。
+#   MT5700M 固件（旧模组插件）→ 沿用 FAN789/luci-app-h5000m-fancontrol 原版
+#     （v2.1.1，纯 shell 控制器），模组温度由 mt5700m-manager 写入同一文件。
+# Config/GENERAL.txt 的启用项两套通用，实际编进哪套由这里的条件克隆决定。
+# WRT_MODEM 来自 WRT-CORE.yml 的 env，未定义时按默认 MT5700 处理。
+WRT_MODEM="${WRT_MODEM:-MT5700}"
+if [ "$WRT_MODEM" = "MT5700M" ]; then
+	UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "FAN789/luci-app-h5000m-fancontrol" "main"
+else
+	UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "LianXia233/luci-app-h5000m-fancontrol" "main"
+fi
 UPDATE_PACKAGE "luci-app-h5000m-netmode" "FAN789/luci-app-h5000m-netmode" "main"
 
 # ===== MT5700M 模组管理插件（2026-10-25，两套并存但同一固件只编译一套）=====
@@ -182,12 +192,27 @@ echo "luci-app-mt5700m version: $MT5700M_INFO"
 [ -n "${GITHUB_ENV:-}" ] && echo "MT5700M_VERSION=$MT5700M_INFO" >> "$GITHUB_ENV"
 
 # ===== luci-app-h5000m-fancontrol 克隆结果校验与版本记录（2026-10-26）=====
-# 风扇插件 v3.x（LianXia233 Rust 重写版）换源后结构有变：新增 src/ Rust 工程与
-# uci-defaults v3，root 下不再有 shell 控制器。上游结构调整、文件改名或漏推时
-# 在此尽早失败，避免数小时后才在编译阶段暴露；同时把版本写入 GITHUB_ENV，
-# 供 Release Notes 引用。
+# 按固件分流后两套来源结构不同：新版（LianXia233）含 src/ Rust 工程与
+# uci-defaults v3、root 下无 shell 控制器；旧版（FAN789）为 shell 控制器 +
+# uci-defaults v2、无 src/。上游结构调整、文件改名或漏推时在此尽早失败，
+# 避免数小时后才在编译阶段暴露；同时把版本与来源写入 GITHUB_ENV，
+# 供 Release Notes 引用（互斥特征文件校验不过 = clone 错了分支/来源）。
 FANCONTROL_DIR="./luci-app-h5000m-fancontrol"
-FANCONTROL_REQUIRED="Makefile
+if [ "$WRT_MODEM" = "MT5700M" ]; then
+	FANCONTROL_SOURCE="FAN789"
+	FANCONTROL_REQUIRED="Makefile
+root/etc/config/h5000m_fancontrol
+root/etc/init.d/h5000m-fancontrol
+root/etc/uci-defaults/91-h5000m-fancontrol-v2
+root/usr/sbin/h5000m-fancontrol
+root/usr/sbin/h5000m-fancontrol-status
+root/usr/share/luci/menu.d/luci-app-h5000m-fancontrol.json
+root/usr/share/rpcd/acl.d/luci-app-h5000m-fancontrol.json
+htdocs/luci-static/resources/view/h5000m/fancontrol.js
+po/zh_Hans/h5000m-fancontrol.po"
+else
+	FANCONTROL_SOURCE="LianXia233"
+	FANCONTROL_REQUIRED="Makefile
 src/Makefile
 src/Cargo.toml
 src/Cargo.lock
@@ -201,18 +226,19 @@ root/usr/share/luci/menu.d/luci-app-h5000m-fancontrol.json
 root/usr/share/rpcd/acl.d/luci-app-h5000m-fancontrol.json
 htdocs/luci-static/resources/view/h5000m/fancontrol.js
 po/zh_Hans/h5000m-fancontrol.po"
+fi
 FANCONTROL_MISSING=""
 while read -r FANCONTROL_FILE; do
 	[ -z "$FANCONTROL_FILE" ] && continue
 	[ -f "$FANCONTROL_DIR/$FANCONTROL_FILE" ] || FANCONTROL_MISSING="$FANCONTROL_MISSING $FANCONTROL_FILE"
 done <<< "$FANCONTROL_REQUIRED"
 if [ -n "$FANCONTROL_MISSING" ]; then
-	echo "ERROR: LianXia233/luci-app-h5000m-fancontrol 仓库结构异常，缺少:$FANCONTROL_MISSING" >&2
+	echo "ERROR: $FANCONTROL_SOURCE/luci-app-h5000m-fancontrol 仓库结构异常，缺少:$FANCONTROL_MISSING" >&2
 	exit 1
 fi
 FANCONTROL_VER=$(sed -n 's/^PKG_VERSION:=//p' "$FANCONTROL_DIR/Makefile" | head -1)
-echo "luci-app-h5000m-fancontrol version: $FANCONTROL_VER"
-[ -n "${GITHUB_ENV:-}" ] && echo "H5000M_FANCONTROL_VERSION=$FANCONTROL_VER" >> "$GITHUB_ENV"
+echo "luci-app-h5000m-fancontrol version: $FANCONTROL_VER（$FANCONTROL_SOURCE，WRT_MODEM=$WRT_MODEM）"
+[ -n "${GITHUB_ENV:-}" ] && echo "H5000M_FANCONTROL_VERSION=$FANCONTROL_VER（$FANCONTROL_SOURCE）" >> "$GITHUB_ENV"
 
 # ===== 深度适配：让包在 buildroot 内使用 CI 预编译的 Rust 后端 =====
 # 固件构建阶段的 PATH 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），
@@ -338,7 +364,12 @@ PY
 }
 
 PREPARE_MT5700_PREBUILT
-PREPARE_FANCONTROL_PREBUILT
+# 风扇控制器预编译注入只适用于新版（LianXia233，MT5700 固件）；旧版（FAN789，
+# MT5700M 固件）为纯 shell 包、无 Rust 产物，WRT-CORE.yml 的 Rust 预编译步骤
+# 对 MT5700M 构建也整体跳过。
+if [ "$WRT_MODEM" != "MT5700M" ]; then
+	PREPARE_FANCONTROL_PREBUILT
+fi
 
 #更新软件包版本
 UPDATE_VERSION() {

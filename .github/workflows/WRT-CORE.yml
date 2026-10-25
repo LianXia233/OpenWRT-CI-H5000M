@@ -393,14 +393,18 @@ jobs:
           echo "MT5700M package smoke test: ALL PASSED"
 
       - name: Smoke Test luci-app-h5000m-fancontrol
-        # 风扇插件 v3.x（LianXia233/luci-app-h5000m-fancontrol，Rust 重写版，两套
-        # 固件都包含）冒烟测试，用例取自其上游 .github/workflows/ci.yml 中不需要
-        # Rust 工具链的部分：结构校验（含本仓库注入的预编译分支）、shell 语法、
-        # LuCI JS 语法与浏览器级渲染冒烟、i18n 完整性、JSON 元数据、上游打包
-        # 红线 / uci-defaults 迁移 / 内核热保护静态检查。
+        # 仅当 WRT_MODEM != 'MT5700M' 时执行：风扇插件按固件分流，本步只覆盖
+        # 新版 LianXia233/luci-app-h5000m-fancontrol（v3.x，Rust 重写版，随
+        # MT5700 固件编译）；MT5700M 固件用的是 FAN789 原版（v2.1.1，纯 shell），
+        # 其克隆完整性由 Packages.sh 的结构校验覆盖，无独立冒烟步骤。
+        # 用例取自新版上游 .github/workflows/ci.yml 中不需要 Rust 工具链的部分：
+        # 结构校验（含本仓库注入的预编译分支）、shell 语法、LuCI JS 语法与
+        # 浏览器级渲染冒烟、i18n 完整性、JSON 元数据、上游打包红线 /
+        # uci-defaults 迁移 / 内核热保护静态检查。
         # Rust 单元测试与交叉编译产物自检在后面 Cross Compile Rust Backends 一步
         # 完成（那里已装好 rustup）。runner 自带 node / jq；gettext 已在
         # Initialization Environment 安装。
+        if: env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/package/luci-app-h5000m-fancontrol
 
@@ -528,8 +532,10 @@ jobs:
           make clean -j$(nproc)
 
       - name: Cross Compile Rust Backends
-        # 两个 Rust 后端：luci-app-h5000m-fancontrol v3.x 的风扇控制器（两套固件
-        # 都编译）与 luci-app-mt5700 的 at-webserver（仅 MT5700 固件）。
+        # 两个 Rust 后端，均只随 MT5700 固件（新插件）编译：
+        # luci-app-h5000m-fancontrol v3.x 的风扇控制器与 luci-app-mt5700 的
+        # at-webserver。MT5700M 固件用旧模组插件（原生 C 传输程序）+ FAN789 原版
+        # 风扇插件（纯 shell），全程无需 Rust，本步整体跳过。
         # buildroot 编译阶段的 PATH 只有交叉工具链（rules.mk 里
         # export PATH:=$(TARGET_PATH)），没有 cargo/rustc；引入
         # feeds/packages/lang/rust 又需现场编译 LLVM（1~2 小时、约 20GB 磁盘），
@@ -542,7 +548,7 @@ jobs:
         # at-webserver：Tokio + rustls 依赖树含 ring（C 代码），链接器用 zig
         # （与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target 不自带
         # libc 与启动对象，zig cc 一次提供 libc 与 C 编译器，免装目标板交叉工具链。
-        if: env.WRT_TEST != 'true'
+        if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/
 
@@ -609,13 +615,6 @@ jobs:
           ls -l prebuilt/
           echo "luci-app-h5000m-fancontrol 预编译控制器就绪：$FAN_SIZE 字节"
           cd "$GITHUB_WORKSPACE/wrt"
-
-          # at-webserver 只随 MT5700 固件编译（luci-app-mt5700）；MT5700M 固件用
-          # 旧插件（原生 C 传输程序，无需 Rust），跳过其后端预编译与 zig 准备。
-          if [ "$WRT_MODEM" = "MT5700M" ]; then
-            echo "==> WRT_MODEM=MT5700M：跳过 at-webserver 预编译"
-            exit 0
-          fi
 
           echo "==> 准备 zig 交叉链接器"
           # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
@@ -768,4 +767,4 @@ jobs:
             插件列表：${{env.WRT_LIST}}
 
             MT5700M 插件版本：${{env.MT5700_PLUGIN_VERSION}}
-            风扇插件版本：${{env.H5000M_FANCONTROL_VERSION}}（luci-app-h5000m-fancontrol）
+            风扇插件版本：${{env.H5000M_FANCONTROL_VERSION}}

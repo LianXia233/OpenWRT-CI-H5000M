@@ -5,6 +5,8 @@
 # 两套插件互斥：都独占 MT5700M 的 AT 串口，同一份 .config 不允许同时启用。
 # CI 在各自作业里追加对应文件，并在 make defconfig 之后校验「本套为 y、另一套为 n」，
 # 不符（同时为 y / 同时为 n）都会直接失败。
+# 风扇控制随本套固件沿用 FAN789 原版（v2.1.1 shell 控制器；Packages.sh 按
+# WRT_MODEM 条件克隆，GENERAL.txt 的启用项两套通用）。
 CONFIG_PACKAGE_luci-app-mt5700m=y
 # 语言包依赖主包，必须同批安装
 CONFIG_PACKAGE_luci-i18n-mt5700m-zh-cn=y

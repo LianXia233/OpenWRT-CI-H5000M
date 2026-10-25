@@ -1,7 +1,9 @@
 # 科学上网插件
 CONFIG_PACKAGE_luci-app-homeproxy=y
 
-# H5000M 风扇控制
+# H5000M 风扇控制（启用项两套固件通用；来源按 WRT_MODEM 在 Packages.sh 条件克隆：
+#   MT5700 固件 → LianXia233/luci-app-h5000m-fancontrol（Rust 重写版 v3.x）
+#   MT5700M 固件 → FAN789/luci-app-h5000m-fancontrol 原版（shell v2.1.1））
 CONFIG_PACKAGE_luci-app-h5000m-fancontrol=y
 # H5000M 网络模式
 CONFIG_PACKAGE_luci-app-h5000m-netmode=y
