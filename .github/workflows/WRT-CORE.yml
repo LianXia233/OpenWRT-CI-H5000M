@@ -62,10 +62,14 @@ env:
 jobs:
   core:
     name: ${{inputs.WRT_SOURCE}}
-    runs-on: ubuntu-latest
+    # 固定 runner 镜像：ubuntu-latest 将于 2026-10-19 起迁移到 Ubuntu 26.04，
+    # 而 immortalwrt 初始化脚本与部分 host 依赖尚未适配，迁移会造成编译中断。
+    # 固定到 ubuntu-24.04 保证可复现构建（需更新镜像时只需改这一处）。
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Projects
-        uses: actions/checkout@v4
+        # node24：actions/checkout@v4 仍运行在已弃用的 Node 20 上
+        uses: actions/checkout@v7
 
       - name: Free Up Disk Space
         # GitHub ubuntu-latest runner 根盘预装 dotnet/android-sdk/ghc 等占用约 25GB，
@@ -167,7 +171,8 @@ jobs:
       - name: Check Caches
         id: check-cache
         if: env.WRT_TEST != 'true'
-        uses: actions/cache@v4
+        # node24：actions/cache@v4 仍运行在已弃用的 Node 20 上
+        uses: actions/cache@v6
         with:
           key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_HASH}}
           restore-keys: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}
@@ -308,6 +313,25 @@ jobs:
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
+          # 目标设备校验（防止 Profile 静默回退到 DEFAULT_PROFILE）
+          # 「Target Profile」是单选 choice：MULTI_PROFILE=n 时生效符号为
+          # CONFIG_TARGET_<target>_DEVICE_xxx；若 .config 未正确选中设备，
+          # defconfig 会回退到 target.mk 的 DEFAULT_PROFILE（filogic 为
+          # openwrt_one），最终编译出错误机型固件，只在镜像打包阶段才暴露
+          # （run 40140034404：openwrt_one 缺少 initramfs 导致 target/linux 失败）。
+          # 此处提前失败，把数小时的错误编译降级为数分钟内的配置错误。
+          DEVICE_SYMBOL=$(grep -oP '^CONFIG_TARGET_[A-Za-z0-9_]+_DEVICE_[A-Za-z0-9_]+(?==y)' \
+            "$GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt" | head -1)
+          if [ -n "$DEVICE_SYMBOL" ]; then
+            if grep -q "^$DEVICE_SYMBOL=y$" .config || \
+               grep -q "^CONFIG_TARGET_DEVICE_${DEVICE_SYMBOL#CONFIG_TARGET_}=y$" .config; then
+              echo "目标设备已生效: $DEVICE_SYMBOL"
+            else
+              echo "::error::目标设备 $DEVICE_SYMBOL 未生效，当前 $(grep -m1 '^CONFIG_TARGET_PROFILE=' .config || echo 'CONFIG_TARGET_PROFILE 未设置')"
+              exit 1
+            fi
+          fi
+
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
       - name: Download Packages
@@ -362,7 +386,8 @@ jobs:
 
       - name: Release Firmware
         if: env.WRT_TEST != 'true'
-        uses: softprops/action-gh-release@v2
+        # node24：softprops/action-gh-release@v2 运行在 Node 20 上
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*

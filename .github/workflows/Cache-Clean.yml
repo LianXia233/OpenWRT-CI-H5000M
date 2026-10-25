@@ -17,10 +17,11 @@ env:
 
 jobs:
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Projects
-        uses: actions/checkout@v4
+        # node24：actions/checkout@v4 仍运行在已弃用的 Node 20 上
+        uses: actions/checkout@v7
 
       - name: Cache Clean
         run: gh cache delete --all

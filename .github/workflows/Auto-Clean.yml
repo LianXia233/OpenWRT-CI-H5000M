@@ -14,7 +14,7 @@ permissions: write-all
 
 jobs:
   auto_clean:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Delete old Releases and Workflows
         uses: ophub/delete-releases-workflows@main
@@ -29,7 +29,8 @@ jobs:
           workflows_keep_day: 30
 
       - name: Delete orphaned Tags
-        uses: actions/github-script@v7
+        # node24：actions/github-script@v7 运行在 Node 20 上
+        uses: actions/github-script@v9
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
