@@ -3,10 +3,18 @@ CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
 
 # 仅编译 Hiveton H5000M
+# 注意：「Target Profile」是单选 choice。
+# - MULTI_PROFILE=y  时生效的是 CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_xxx
+#   （Target Devices 菜单）。
+# - MULTI_PROFILE=n  时生效的是 CONFIG_TARGET_mediatek_filogic_DEVICE_xxx
+#   （无 DEVICE_ 前缀的那一层 choice）。
+# 旧配置在 MULTI_PROFILE=n 下只写了 CONFIG_TARGET_DEVICE_...，该符号此时不生效，
+# defconfig 静默回退到 target.mk 的 DEFAULT_PROFILE（filogic 为 openwrt_one），
+# 编出的是 OpenWrt One 固件并在打包阶段失败（run 40140034404）。
 CONFIG_TARGET_MULTI_PROFILE=n
 CONFIG_TARGET_ALL_PROFILES=n
-CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_hiveton_h5000m=y
+CONFIG_TARGET_mediatek_filogic_DEVICE_hiveton_h5000m=y
 
-# 内核调整
+# 必备插件
 CONFIG_PACKAGE_kmod-cryptodev=y
 CONFIG_PACKAGE_kmod-tls=y
