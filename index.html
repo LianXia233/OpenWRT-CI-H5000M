@@ -1037,7 +1037,7 @@
                                 <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">MTK-AUTO 每日构建</span>
                             </div>
                             <p class="text-xs text-slate-500 mt-1">
-                                本项目配置了每天 05:00 定时清理旧版本并重新构建最新主线（VIKINGYFY/owrt），新版本编译完成后将立即自动归档至 Releases！
+                                本项目每天 05:00 定时清理旧版本并重新构建最新主线（VIKINGYFY/owrt），同时产出 MT5700 与 MT5700M 两套固件，编译完成后立即自动归档至 Releases！
                             </p>
                         </div>
                     </div>
@@ -1059,7 +1059,7 @@
                                 <span class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
                                 <div>
                                     <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">openwrt-mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade.bin</p>
-                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 集成 MT5700M 模组管理/风扇温控/网络模式/TTYD/HomeProxy</p>
+                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 每日分别产出 MT5700 / MT5700M 两套（各集成模组管理/风扇温控/网络模式/TTYD/HomeProxy）</p>
                                 </div>
                             </div>
                             <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>
@@ -1080,7 +1080,7 @@
                             <div class="flex items-center gap-3">
                                 <span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold font-mono">TXT</span>
                                 <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">Config-MEDIATEK-WIFI-YES-VIKINGYFY-owrt-*.txt</p>
+                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">Config-MEDIATEK-WIFI-YES-VIKINGYFY-owrt-{MT5700|MT5700M}-*.txt</p>
                                     <p class="text-[11px] text-slate-400">完整编译 .config 清单 · 包含所有选中的 kmod 与 luci 扩展包</p>
                                 </div>
                             </div>

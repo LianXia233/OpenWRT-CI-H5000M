@@ -25,9 +25,9 @@
 
 | 入口工作流 | 调度方式 | 核心功能与说明 |
 | :--- | :--- | :--- |
-| **WRT-BUILD** | 手动 `workflow_dispatch` | 手动编译 `MEDIATEK-WIFI-YES`，支持临时传参追加插件或快速验证配置（`TEST=true`） |
-| **MTK-AUTO** | 定时联动（`Auto-Clean` 完成后）/ 手动 | 全量自动构建最新主线固件并自动归档发布至 `Releases` |
-| **Auto-Clean** | 每日 05:00 (CST) 定时 / 手动 | 定期清理历史构建资产（清理全部历史 Release 及孤立 Tag、30 天前的 Runs 记录；随后由 MTK-AUTO 触发新构建，故始终保有当日最新版本） |
+| **WRT-BUILD** | 手动 `workflow_dispatch` | 手动编译 `MEDIATEK-WIFI-YES`（同样固定产出 `MT5700` / `MT5700M` 两套固件），支持临时传参追加插件或快速验证配置（`TEST=true`） |
+| **MTK-AUTO** | 定时联动（`Auto-Clean` 完成后）/ 手动 | 每次运行固定产出**两套固件**（`MT5700` 与 `MT5700M` 各一个并行作业、各一个 Release），无需选择 |
+| **Auto-Clean** | 每日 05:00 (CST) 定时 / 手动 | 定期清理历史构建资产（清理全部历史 Release 及孤立 Tag、30 天前的 Runs 记录；随后由 MTK-AUTO 触发新构建，故始终保有当日两套最新版本） |
 | **Cache-Clean** | 每周定时 / 手动 | 释放 GitHub Actions 编译缓存，防止构建缓存膨胀或依赖冲突 |
 
 ### 2. 手动编译触发步骤
@@ -94,20 +94,21 @@ OpenWRT-CI-H5000M/
 
 ## 🧩 二、 核心专属 5G CPE 插件
 
-固件深度集成两套硬件级适配套件：模组管理提供 **两套可选插件**（默认 `luci-app-mt5700`），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
+固件深度集成两套硬件级适配套件：模组管理**每次构建同时产出两套固件**（`MT5700` / `MT5700M`，各自只含一套插件），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
 
-### 🎛️ 模组插件二选一：`MT5700`（默认）/ `MT5700M`
+### 🎛️ 模组插件：每次构建固定产出两套固件
 
-两套插件都独占 MT5700M 的 AT 串口，**同一份 `.config` 只能启用其中一个**：
+两套插件都独占 MT5700M 的 AT 串口，**同一份 `.config` 只能启用其中一个**，因此每次构建固定拆成两个并行作业，各出一套固件（无需在触发时做选择）：
 
-| 选项 | 插件 | 形态 | 配置文件 |
+| 固件 | 插件 | 形态 | 配置文件 |
 | :--- | :--- | :--- | :--- |
-| `MT5700`（默认） | [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700) | LuCI 前端 + Rust/Tokio 常驻后端，12 个页面 | `Config/MT5700.txt` |
+| `MT5700` | [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700) | LuCI 前端 + Rust/Tokio 常驻后端，12 个页面 | `Config/MT5700.txt` |
 | `MT5700M` | [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m) | LuCI 前端 + 原生 C 传输程序 `mt5700m-transport` | `Config/MT5700M.txt` |
 
-* 手动触发 `WRT-BUILD` / `MTK-AUTO` 时用 **MODEM** 下拉框选择；定时构建未指定时默认 `MT5700`。
-* 两套插件源码都会 clone 到 `package/`，只有被选中的那套参与编译。
-* CI 在 `make defconfig` 之后强制校验：两套主包同时为 `y`、或与所选 `MODEM` 不一致、或缺配套语言包，都会立刻失败（防止固件里出现两套抢同一串口的插件）。
+* `MTK-AUTO`（每日定时）与 `WRT-BUILD`（手动）都是固定矩阵 `MODEM: [MT5700, MT5700M]`，一次运行产出**两个 Release**；`fail-fast: false`，一套失败不影响另一套。
+* Release Tag 与固件文件名均带插件标识：`...-owrt-MT5700-<时间>` / `...-owrt-MT5700M-<时间>`，同一固件内绝不会同时出现两套插件。
+* 两套插件源码都会 clone 到 `package/`，每次构建只编译对应那一套。
+* CI 在 `make defconfig` 之后强制校验：两套主包同时为 `y`、或缺配套语言包，都会立刻失败（防止固件里出现两套抢同一串口的插件）。
 * 两者都**不能**与 QModem 等同样占用模组串口的服务共存。
 
 ### 1. MT5700M 5G 模组管理（`luci-app-mt5700`）
@@ -129,14 +130,14 @@ OpenWRT-CI-H5000M/
 * 🛠️ **构建方式（本仓库深度适配）**：后端为静态 musl 二进制，CI 在编译固件前用 rustup + zig 交叉编译出 aarch64 产物并交给包内预编译分支安装——buildroot 编译阶段没有 cargo，也不需要在 CI 里现编 host rust（详见更新日志）。
 
 > [!IMPORTANT]
-> **与旧插件 `luci-app-mt5700m`、QModem 不兼容。** 三者都独占同一 AT 串口，同时安装会互相抢口，表现为 AT 指令超时、拨号状态来回跳、模组「无响应」。本仓库通过「一次构建只启用一套」来避免这个问题（见上文二选一说明），请勿在固件装好后再从软件源手工加装另一套。
+> **与旧插件 `luci-app-mt5700m`、QModem 不兼容。** 三者都独占同一 AT 串口，同时安装会互相抢口，表现为 AT 指令超时、拨号状态来回跳、模组「无响应」。本仓库通过「每个固件只启用一套」来避免这个问题（见上文说明），请勿在固件装好后再从软件源手工加装另一套。
 
-#### 备选：`luci-app-mt5700m`（选项 `MT5700M`）
+#### 另一套固件：`luci-app-mt5700m`（`MT5700M`）
 
-需要旧插件的能力（原生 C 传输程序 `mt5700m-transport`、`/etc/mt5700m/traffic-history` 流量历史、链路健康自愈）时，把 `MODEM` 选为 `MT5700M`（或直接改用 `Config/MT5700M.txt`）：
+需要旧插件的能力（原生 C 传输程序 `mt5700m-transport`、`/etc/mt5700m/traffic-history` 流量历史、链路健康自愈）时，直接下载同批次发布的 `MT5700M` 固件（对应 `Config/MT5700M.txt`）：
 
 * 入口同样是「网络 → MT5700M 5G 模组」，运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件。
-* 该选项下不会编译 `luci-app-mt5700`，温度桥接脚本也不会进入固件（它只随新插件打包）；语言包为 `luci-i18n-mt5700m-zh-cn`。
+* 该固件下不会编译 `luci-app-mt5700`，温度桥接脚本也不会进入固件（它只随新插件打包）；语言包为 `luci-i18n-mt5700m-zh-cn`。
 * 旧插件额外依赖 `flock`（该依赖只在 `Config/MT5700M.txt` 中启用）。
 
 ### 2. 硬件级智能风扇温控 (`luci-app-h5000m-fancontrol`)

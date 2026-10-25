@@ -29,14 +29,6 @@ on:
         default: 'owrt'
         required: true
         type: string
-      MODEM:
-        description: 'MT5700M 模组管理插件（两者独占 AT 串口，只能二选一）'
-        default: 'MT5700'
-        required: true
-        type: choice
-        options:
-          - MT5700
-          - MT5700M
       PACKAGE:
         description: '手动调整插件包，多个请用换行隔开'
         required: false
@@ -53,7 +45,13 @@ permissions: write-all
 # CI 任务
 jobs:
   config:
-    name: ${{ inputs.CONFIG }}
+    name: ${{ matrix.CONFIG }} · ${{ matrix.MODEM }}
+    # 两套模组插件独占同一 AT 串口，每次构建固定各编一套固件（两个并行作业），
+    # 无需在触发时选择；一套失败不影响另一套。
+    strategy:
+      fail-fast: false
+      matrix:
+        MODEM: [MT5700, MT5700M]
     # 调用公用编译核心 WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
     with:
@@ -77,8 +75,8 @@ jobs:
       WRT_BRANCH: ${{ inputs.BRANCH }}
       # 源码名称
       WRT_SOURCE: ${{ inputs.SOURCE }}
-      # 模组插件二选一
-      WRT_MODEM: ${{ inputs.MODEM }}
+      # 模组插件（由矩阵传入，两套固件各编一套）
+      WRT_MODEM: ${{ matrix.MODEM }}
       # 插件调整
       WRT_PACKAGE: ${{ inputs.PACKAGE }}
       # 仅输出配置文件

@@ -13,14 +13,6 @@ on:
   # 也可手动触发
   workflow_dispatch:
     inputs:
-      MODEM:
-        description: 'MT5700M 模组管理插件（两者独占 AT 串口，只能二选一）。'
-        default: 'MT5700'
-        required: false
-        type: choice
-        options:
-          - MT5700
-          - MT5700M
       PACKAGE:
         description: '手动调整插件包，多个请用换行隔开。'
         required: false
@@ -35,12 +27,16 @@ permissions: write-all
 
 jobs:
   config:
-    name: ${{ matrix.CONFIG }}
+    name: ${{ matrix.CONFIG }} · ${{ matrix.MODEM }}
     strategy:
       fail-fast: false
       matrix:
         # H5000M 专用：仅编译 MEDIATEK-WIFI-YES
         CONFIG: [MEDIATEK-WIFI-YES]
+        # 两套插件独占同一 AT 串口，不能塞进同一份 .config。
+        # 故每次构建固定拆成两个作业：各编一套固件、各发一个 Release，
+        # 无需在触发时做选择；一套失败（fail-fast: false）也不影响另一套。
+        MODEM: [MT5700, MT5700M]
         SOURCE: [VIKINGYFY/immortalwrt]
         BRANCH: [owrt]
 
@@ -59,6 +55,6 @@ jobs:
       WRT_BRANCH: ${{ matrix.BRANCH }}
       WRT_SOURCE: ${{ matrix.SOURCE }}
 
-      WRT_MODEM: ${{ inputs.MODEM }}
+      WRT_MODEM: ${{ matrix.MODEM }}
       WRT_PACKAGE: ${{ inputs.PACKAGE }}
       WRT_TEST: ${{ inputs.TEST }}

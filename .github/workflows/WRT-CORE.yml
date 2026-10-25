@@ -44,9 +44,10 @@ on:
         required: false
         type: string
       WRT_MODEM:
-        # MT5700M 模组管理插件二选一：MT5700 = LianXia233/luci-app-mt5700，
-        # MT5700M = FAN789/luci-app-mt5700m。两者都独占同一 AT 串口，
-        # 同一份 .config 只能启用其中一个（下面 Custom Settings 会强制校验）。
+        # 本次编译使用的模组插件：MT5700 = LianXia233/luci-app-mt5700，
+        # MT5700M = FAN789/luci-app-mt5700m。两者独占同一 AT 串口，
+        # 故每个固件只能启用其中一个；调用方以矩阵方式各编一套
+        # （见 MTK-AUTO / WRT-BUILD），此处为单次构建的入参。
         required: false
         type: string
         default: MT5700
@@ -70,7 +71,7 @@ env:
 
 jobs:
   core:
-    name: ${{inputs.WRT_SOURCE}}
+    name: ${{inputs.WRT_SOURCE}} · ${{inputs.WRT_MODEM || 'MT5700'}}
     # 固定 runner 镜像：ubuntu-latest 将于 2026-10-19 起迁移到 Ubuntu 26.04，
     # 而 immortalwrt 初始化脚本与部分 host 依赖尚未适配，迁移会造成编译中断。
     # 固定到 ubuntu-24.04 保证可复现构建（需更新镜像时只需改这一处）。
@@ -399,9 +400,9 @@ jobs:
         run: |
           cd ./wrt/
 
-          # MT5700M 模组管理插件二选一：只追加被选中的那份插件配置
+          # MT5700M 模组管理插件：单次构建只追加对应那份插件配置
           # （Config/MT5700.txt = 新插件 luci-app-mt5700；Config/MT5700M.txt = 旧插件
-          #  luci-app-mt5700m）。两者都独占同一 AT 串口，同时启用必然互相抢口。
+          #  luci-app-mt5700m）。两者独占同一 AT 串口，由调用方矩阵各编一套固件。
           MODEM_CFG="$GITHUB_WORKSPACE/Config/${WRT_MODEM}.txt"
           if [ ! -f "$MODEM_CFG" ]; then
             echo "::error::WRT_MODEM=$WRT_MODEM 没有对应配置，可选 MT5700 / MT5700M（需存在 Config/\$WRT_MODEM.txt）"
@@ -620,7 +621,7 @@ jobs:
         run: |
           cd ./wrt/ && mkdir ./upload/
 
-          cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
+          cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_MODEM"-"$WRT_DATE".txt
 
           if [[ $WRT_TEST != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
@@ -631,7 +632,7 @@ jobs:
             for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
               EXT=$(basename $FILE | cut -d '.' -f 2-)
               NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
-              NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$WRT_DATE"."$EXT"
+              NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$WRT_MODEM"-"$WRT_DATE"."$EXT"
               mv -f $FILE ./upload/$NEW_FILE
             done
 
@@ -645,7 +646,7 @@ jobs:
         # node24：softprops/action-gh-release@v2 运行在 Node 20 上
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
+          tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_MODEM}}-${{env.WRT_DATE}}
           files: ./wrt/upload/*.*
           body: |
             Hiveton H5000M (MT5700M) 定制固件 · 基于 ImmortalWrt
@@ -656,6 +657,9 @@ jobs:
 
             配置：${{env.WRT_CONFIG}}
             平台：${{env.WRT_TARGET}}
+
+            模组插件：${{env.WRT_MODEM}}（MT5700 = luci-app-mt5700 / MT5700M = luci-app-mt5700m）
+            每日构建会分别产出两套固件，两套插件独占同一 AT 串口，请按需下载其中一套。
 
             登录地址：${{env.WRT_IP}}
             登录密码：${{env.WRT_PW}}

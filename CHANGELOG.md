@@ -2,6 +2,40 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-25] 一次构建固定产出两套固件（MT5700 + MT5700M）
+
+### 背景
+
+两套模组插件独占同一 AT 串口，不能塞进同一份 `.config`，但也不该在触发时让人做选择。
+故改为**固定并行**：每次构建都同时编两套固件，各自只含一套插件，分别发布为两个 Release。
+
+### 变更
+
+- `.github/workflows/MTK-AUTO.yml`：`config` 作业改为固定矩阵
+  `MODEM: [MT5700, MT5700M]`，每日定时（`Auto-Clean` 完成后）与手动触发都是两个并行作业；
+  删除了原来的 `MODEM` 下拉输入。`fail-fast: false`：一套失败不影响另一套继续编译发布。
+- `.github/workflows/WRT-BUILD.yml`：同样改为固定矩阵并移除 `MODEM` 下拉输入，
+  手动编译一次即产出两套固件。
+- `.github/workflows/WRT-CORE.yml`：产物与 Release 增加插件标识，避免两套同名互相覆盖。
+  - Release Tag：`<CONFIG>-<SOURCE>-<BRANCH>-<MODEM>-<时间>`
+  - 固件文件名：`<原名>-<SOURCE>-<BRANCH>-wifi-yes-<MODEM>-<时间>.<ext>`
+  - `.config` 归档名：`Config-<CONFIG>-<SOURCE>-<BRANCH>-<MODEM>-<时间>.txt`
+  - Release Notes 增加「模组插件」行，注明两套固件并存、按需下载其中一套。
+  - 作业显示名加插件标识，便于在 Actions 列表里区分两个并行构建。
+- `README.md`：更新工作流一览、模组插件说明（每次构建产出两套、命名规则）。
+- `index.html`：「自动构建中」提示与预期制品清单补充两套固件说明。
+
+### 不兼容说明
+
+- 两套固件**分别**只含一套插件，互不通用；不要在一个固件上手工加装另一套。
+- 每次构建占用两个 Runner 并行编译（时长与资源约为原来的两倍）。
+
+### 验证
+
+- 三个 workflow 文件通过 YAML 解析，`bash -n` 通过。
+- 矩阵展开核对：`MTK-AUTO` / `WRT-BUILD` 均为 `MT5700` + `MT5700M` 两个作业，
+  分别对应 `Config/MT5700.txt` / `Config/MT5700M.txt`。
+
 ## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（旧插件保留为可选项，二选一编译）
 
 ### 背景
