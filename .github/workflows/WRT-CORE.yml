@@ -253,16 +253,15 @@ jobs:
           cd ./wrt/package/luci-app-mt5700
 
           echo "==> 结构校验（含本仓库深度适配注入）"
-          # Scripts/Packages.sh 会做两处注入：src/Makefile 的预编译后端分支、
-          # root 下的模组温度桥接三件套。任一缺失说明克隆或注入失败，编译必然出错。
+          # Scripts/Packages.sh 会做一处注入：src/Makefile 的预编译后端分支。
+          # 任一缺失说明克隆或注入失败，编译必然出错。
+          # （2026-10-26 起不再注入 mt5700-temp-bridge：风扇插件已换用
+          #   LianXia233/luci-app-h5000m-fancontrol，温度桥接由其控制器原生完成。）
           test -f src/Makefile
           test -f src/rust/Cargo.toml
           test -f src/rust/Cargo.lock
           grep -q 'MT5700_PREBUILT_HOOK' src/Makefile
           grep -q 'at-webserver-rust' src/Makefile
-          test -x root/usr/sbin/mt5700-temp-bridge
-          test -x root/etc/init.d/mt5700-temp-bridge
-          test -x root/etc/uci-defaults/93-mt5700-temp-bridge
           test -x root/etc/init.d/at-webserver
           test -x root/etc/uci-defaults/at-webserver
           test -x root/etc/hotplug.d/iface/99-at-webserver
@@ -273,12 +272,9 @@ jobs:
           # tests/iface/interface-selection.sh 需要真机 uci 环境才能跑，这里只查语法
           for SH in \
             root/etc/init.d/at-webserver \
-            root/etc/init.d/mt5700-temp-bridge \
             root/etc/uci-defaults/at-webserver \
-            root/etc/uci-defaults/93-mt5700-temp-bridge \
             root/etc/hotplug.d/iface/99-at-webserver \
             root/etc/hotplug.d/usb/99-at-webserver \
-            root/usr/sbin/mt5700-temp-bridge \
             root/usr/libexec/at-webserver/on-uplink.sh \
             tests/iface/interface-selection.sh; do
             sh -n "$SH"
@@ -396,6 +392,61 @@ jobs:
 
           echo "MT5700M package smoke test: ALL PASSED"
 
+      - name: Smoke Test luci-app-h5000m-fancontrol
+        # 风扇插件 v3.x（LianXia233/luci-app-h5000m-fancontrol，Rust 重写版，两套
+        # 固件都包含）冒烟测试，用例取自其上游 .github/workflows/ci.yml 中不需要
+        # Rust 工具链的部分：结构校验（含本仓库注入的预编译分支）、shell 语法、
+        # LuCI JS 语法与浏览器级渲染冒烟、i18n 完整性、JSON 元数据、上游打包
+        # 红线 / uci-defaults 迁移 / 内核热保护静态检查。
+        # Rust 单元测试与交叉编译产物自检在后面 Cross Compile Rust Backends 一步
+        # 完成（那里已装好 rustup）。runner 自带 node / jq；gettext 已在
+        # Initialization Environment 安装。
+        run: |
+          cd ./wrt/package/luci-app-h5000m-fancontrol
+
+          echo "==> 结构校验（含本仓库深度适配注入）"
+          # Scripts/Packages.sh 会做一处注入：src/Makefile 的预编译控制器分支与
+          # cargo 缺失告警降级。缺失说明克隆或注入失败，编译必然出错。
+          test -f Makefile
+          test -f src/Cargo.toml
+          test -f src/Cargo.lock
+          test -f src/.cargo/config.toml
+          grep -q 'H5000M_FANCONTROL_PREBUILT_HOOK' src/Makefile
+          grep -q 'warning h5000m-fancontrol: cargo not found' src/Makefile
+          test -x root/etc/init.d/h5000m-fancontrol
+          test -x root/etc/uci-defaults/91-h5000m-fancontrol-v3
+          test -x root/usr/sbin/h5000m-fancontrol-status
+          test -f root/etc/config/h5000m_fancontrol
+          test -f htdocs/luci-static/resources/view/h5000m/fancontrol.js
+          test -f po/zh_Hans/h5000m-fancontrol.po
+
+          echo "==> Shell 语法检查"
+          for SH in \
+            root/etc/init.d/h5000m-fancontrol \
+            root/etc/uci-defaults/91-h5000m-fancontrol-v3 \
+            root/usr/sbin/h5000m-fancontrol-status; do
+            sh -n "$SH"
+          done
+
+          echo "==> LuCI JavaScript 语法与渲染冒烟"
+          node --check htdocs/luci-static/resources/view/h5000m/fancontrol.js
+          node tests/frontend-smoke.js
+
+          echo "==> i18n 与 JSON 元数据校验"
+          node scripts/i18n-audit.js
+          msgfmt --check --check-format -o /dev/null po/zh_Hans/h5000m-fancontrol.po
+          jq empty root/usr/share/luci/menu.d/luci-app-h5000m-fancontrol.json
+          jq empty root/usr/share/rpcd/acl.d/luci-app-h5000m-fancontrol.json
+
+          echo "==> 上游打包红线 / uci-defaults 迁移 / 内核热保护静态检查"
+          # test-packaging.sh 断言 src/Makefile 含 aarch64 目标与 FILE_MACHINE_
+          # 架构校验：预编译注入保留了这些行，若上游重构 Makefile 会在此失败。
+          sh tests/test-packaging.sh
+          sh tests/test-uci-defaults.sh
+          sh tests/test-kernel-safety.sh
+
+          echo "luci-app-h5000m-fancontrol package smoke test: ALL PASSED"
+
       - name: Custom Settings
         run: |
           cd ./wrt/
@@ -476,18 +527,22 @@ jobs:
 
           make clean -j$(nproc)
 
-      - name: Cross Compile Rust Backend
-        # luci-app-mt5700 的后端是 Rust/Tokio 常驻程序。buildroot 编译阶段的 PATH
-        # 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），没有 cargo/rustc；
-        # 引入 feeds/packages/lang/rust 又需现场编译 LLVM（1~2 小时、约 20GB 磁盘），
-        # 不适合 CI。故这里用 runner 自带 rustup 交叉编译出与固件架构一致的静态
-        # musl 二进制，由 Scripts/Packages.sh 注入的 MT5700_PREBUILT_HOOK 直接装包；
-        # 万一产物缺失，上游 src/Makefile 仍会回退到 cargo build。
+      - name: Cross Compile Rust Backends
+        # 两个 Rust 后端：luci-app-h5000m-fancontrol v3.x 的风扇控制器（两套固件
+        # 都编译）与 luci-app-mt5700 的 at-webserver（仅 MT5700 固件）。
+        # buildroot 编译阶段的 PATH 只有交叉工具链（rules.mk 里
+        # export PATH:=$(TARGET_PATH)），没有 cargo/rustc；引入
+        # feeds/packages/lang/rust 又需现场编译 LLVM（1~2 小时、约 20GB 磁盘），
+        # 不适合 CI。故这里用 rustup 交叉编译出与固件架构一致的静态 musl 二进制，
+        # 由 Scripts/Packages.sh 注入的 *_PREBUILT_HOOK 直接装包；万一产物缺失，
+        # 上游 src/Makefile 仍会回退到 cargo build。
         #
-        # 链接器用 zig（与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target
-        # 不自带 libc 与启动对象，且 ring（rustls 的 TLS 实现）含 C 代码需要 C 编译器，
-        # zig cc 一次提供两者，免装目标板交叉工具链。
-        if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
+        # 风扇控制器：零依赖 crate，.cargo/config.toml 已固定 rust-lld，musl 目标
+        # 自包含静态链接，不需要 zig 或交叉 gcc。
+        # at-webserver：Tokio + rustls 依赖树含 ring（C 代码），链接器用 zig
+        # （与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target 不自带
+        # libc 与启动对象，zig cc 一次提供 libc 与 C 编译器，免装目标板交叉工具链。
+        if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
 
@@ -519,6 +574,48 @@ jobs:
           rustup target add "$RUST_TARGET"
           cargo --version
           rustc --version
+
+          echo "==> 风扇控制器上游测试（宿主构建）"
+          # 上游 CI 的 rust 作业：零依赖 crate，宿主跑全量单测与回归只需一两分钟；
+          # 控制器是安全关键组件（PWM / 内核热保护交互），交叉编译前先过测试。
+          cd package/luci-app-h5000m-fancontrol/src
+          cargo test --locked --release
+
+          echo "==> 交叉编译 h5000m-fancontrol（两套固件共用）"
+          CARGO_TARGET_DIR=/tmp/h5fan-target \
+            cargo build --release --locked --target "$RUST_TARGET"
+
+          echo "==> 产物自检"
+          FAN_BIN="/tmp/h5fan-target/$RUST_TARGET/release/h5000m-fancontrol"
+          file "$FAN_BIN"
+          file "$FAN_BIN" | grep -q 'ARM aarch64' || { echo "::error::风扇控制器不是 aarch64 ELF"; exit 1; }
+          file "$FAN_BIN" | grep -q 'statically linked' || { echo "::error::风扇控制器不是静态链接"; exit 1; }
+          readelf -d "$FAN_BIN" | grep -q 'no dynamic section' || {
+            echo "::error::风扇控制器带动态段，固件缺少对应 musl 动态库时无法启动"
+            readelf -d "$FAN_BIN"
+            exit 1
+          }
+          # 零依赖 + opt-level=z + strip 后体积远小于 at-webserver，闸门只拦
+          # 「产物被截断 / 构建未完成」，不设兆级下限。
+          FAN_SIZE=$(stat -c %s "$FAN_BIN")
+          if [ "$FAN_SIZE" -lt 65536 ]; then
+            echo "::error::风扇控制器体积异常（$FAN_SIZE 字节），疑似构建未完成"
+            exit 1
+          fi
+
+          mkdir -p prebuilt
+          cp -f "$FAN_BIN" prebuilt/h5000m-fancontrol
+          chmod 0755 prebuilt/h5000m-fancontrol
+          ls -l prebuilt/
+          echo "luci-app-h5000m-fancontrol 预编译控制器就绪：$FAN_SIZE 字节"
+          cd "$GITHUB_WORKSPACE/wrt"
+
+          # at-webserver 只随 MT5700 固件编译（luci-app-mt5700）；MT5700M 固件用
+          # 旧插件（原生 C 传输程序，无需 Rust），跳过其后端预编译与 zig 准备。
+          if [ "$WRT_MODEM" = "MT5700M" ]; then
+            echo "==> WRT_MODEM=MT5700M：跳过 at-webserver 预编译"
+            exit 0
+          fi
 
           echo "==> 准备 zig 交叉链接器"
           # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
@@ -671,3 +768,4 @@ jobs:
             插件列表：${{env.WRT_LIST}}
 
             MT5700M 插件版本：${{env.MT5700_PLUGIN_VERSION}}
+            风扇插件版本：${{env.H5000M_FANCONTROL_VERSION}}（luci-app-h5000m-fancontrol）

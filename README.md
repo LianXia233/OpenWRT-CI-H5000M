@@ -94,7 +94,7 @@ OpenWRT-CI-H5000M/
 
 ## 🧩 二、 核心专属 5G CPE 插件
 
-固件深度集成两套硬件级适配套件：模组管理**每次构建同时产出两套固件**（`MT5700` / `MT5700M`，各自只含一套插件），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
+固件深度集成硬件级适配套件：模组管理**每次构建同时产出两套固件**（`MT5700` / `MT5700M`，各自只含一套插件）；风扇温控采用 **LianXia233** 的 [luci-app-h5000m-fancontrol](https://github.com/LianXia233/luci-app-h5000m-fancontrol)（FAN789 原版 v2.x 的 Rust 重写分支，v3.x），网络模式切换沿用 **FAN789** 的 H5000M 套件。
 
 ### 🎛️ 模组插件：每次构建固定产出两套固件
 
@@ -125,7 +125,7 @@ OpenWRT-CI-H5000M/
 | 调试与运维 | AT 调试终端 · 运行日志 · 服务配置 | 手工下发 AT 指令、后端日志检索、串口与后端参数配置 |
 
 * 🩺 **事件通知与自愈**：信号定时巡检、事件推送（Webhook / 邮件 / QQ 机器人等），并区分「数据链路已连接」与「互联网验证通过」，按条件恢复数据会话。
-* ❄️ **温度联动（本仓库注入）**：随包附带 `mt5700-temp-bridge`，每 30 秒经 `ubus call mt5700 at` 取一次 `AT^CHIPTEMP?` 的 12 路芯片温度，按旧格式（`updated=` + `temperature=`）原子写入 `/var/run/mt5700m/temperature`，**风扇温控插件无需改动**即可继续拿到模组温度。
+* ❄️ **温度联动（风扇控制器内置）**：风扇温控插件 v3.x 每 30 秒经该后端的本地 RPC（`127.0.0.1:8765`，newline-JSON）下发一次 `AT^CHIPTEMP?`，取 12 路芯片温度的峰值，按旧格式（`updated=` + `temperature=`）原子写入 `/var/run/mt5700m/temperature` 供调速曲线使用；AT 串口仍由后端独占，查询失败（后端未运行）只是该周期无模组温度，不影响其余传感器。
 * 🧱 **服务与配置**：服务 `/etc/init.d/at-webserver`（procd，含接口拉起与开机自愈）、配置 `/etc/config/at-webserver`、后端 `/usr/bin/at-webserver-rust`；rpcd ucode 插件经 `nc 127.0.0.1 <port>` 访问后端（`nc` / `timeout` 由 busybox 默认提供）。
 * 🛠️ **构建方式（本仓库深度适配）**：后端为静态 musl 二进制，CI 在编译固件前用 rustup + zig 交叉编译出 aarch64 产物并交给包内预编译分支安装——buildroot 编译阶段没有 cargo，也不需要在 CI 里现编 host rust（详见更新日志）。
 
@@ -136,17 +136,19 @@ OpenWRT-CI-H5000M/
 
 需要旧插件的能力（原生 C 传输程序 `mt5700m-transport`、`/etc/mt5700m/traffic-history` 流量历史、链路健康自愈）时，直接下载同批次发布的 `MT5700M` 固件（对应 `Config/MT5700M.txt`）：
 
-* 入口同样是「网络 → 移动网络 → MT5700M 模组」（`admin/modem/mt5700m`），运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件。
-* 该固件下不会编译 `luci-app-mt5700`，温度桥接脚本也不会进入固件（它只随新插件打包）；语言包为 `luci-i18n-mt5700m-zh-cn`。
+* 入口同样是「网络 → 移动网络 → MT5700M 模组」（`admin/modem/mt5700m`），运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件（其内置的 RPC 温度查询在后端不在时静默跳过，模组温度由旧插件写入的缓存提供）。
+* 该固件下不会编译 `luci-app-mt5700`；语言包为 `luci-i18n-mt5700m-zh-cn`。
 * 旧插件额外依赖 `flock`（该依赖只在 `Config/MT5700M.txt` 中启用）。
 
 ### 2. 硬件级智能风扇温控 (`luci-app-h5000m-fancontrol`)
 
-针对 5G 蜂窝模组在高负载上传下载时的剧烈发热，提供精准的闭环散热管理：
+针对 5G 蜂窝模组在高负载上传下载时的剧烈发热，提供精准的闭环散热管理。自 2026-10-26 起采用 [LianXia233/luci-app-h5000m-fancontrol](https://github.com/LianXia233/luci-app-h5000m-fancontrol)（FAN789 原版 v2.x shell 控制器的 Rust 重写分支，当前 **v3.2.0**）：
 
-* 🌡️ **双传感器轮询**：实时并发采集 SoC 核心与 MT5700M 基带模组的温度数据。
-* 🌀 **PWM 阶梯变速**：预设多级触发区间，根据双路最高温度自适应匹配风扇转速百分比，在待机静音与满载散热间达成最佳平衡。
-* 🛠️ **策略高度自定义**：支持自主设定起转温度、警戒温度阈值及调速步长，适应不同季节与摆放环境。
+* 🦀 **原生 Rust 控制器**：零依赖静态 musl 二进制 `/usr/sbin/h5000m-fancontrol`（CI 用 rustup 交叉编译后经包内预编译分支安装），procd 常驻、崩溃自动拉起；保存配置只发 `SIGHUP` 热加载，不重启风扇。
+* 🌡️ **多传感器融合**：实时采集 SoC 热区 / hwmon 与 MT5700M 基带模组（经 at-webserver RPC 桥接，见上文温度联动）两路温度，取最高值驱动曲线；任一传感器缺失或读数异常（不可读 / 超界 / 过期）一律视为未知，绝不折算成 0 ℃ 进入控制输入。
+* 🔒 **内核安全兜底**：控制器从不触碰 CPU 热区策略，只接管风扇 cooling-maps；CPU 降频与高温 / 临界保护由内核 `step_wise` 继续兜底，风扇失联自动回退全速（fail-safe PWM 255）。
+* 🌀 **PWM 阶梯变速**：静音 / 均衡 / 性能 / 自定义四条曲线，支持起转 PWM 与起转助推、温度迟滞与降速延时，兼顾待机静音与满载散热。
+* 🖥️ **六 TAB LuCI 界面**：总览 / 风扇控制 / 曲线 / 温度监控 / 系统设置 / 诊断，原生 SVG 风扇图与曲线图，深浅色自适应。
 
 ### 3. 网络模式无缝切换 (`luci-app-h5000m-netmode`)
 
@@ -172,8 +174,8 @@ OpenWRT-CI-H5000M/
 
 * 🐧 **[ImmortalWrt](https://github.com/immortalwrt/immortalwrt/?utm_source=gemini)**：提供功能丰富、性能卓越的主线底层路由源码。
 * 👤 **[VIKINGYFY](https://github.com/VIKINGYFY?utm_source=gemini)**：为本项目提供经过长期实机验证的云端构建脚手架、底包配置与插件优化模板。
-* 👤 **[LianXia233](https://github.com/LianXia233?utm_source=gemini)**：提供 [luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700?utm_source=gemini) —— 编入 `MT5700` 固件的 MT5700M 模组管理插件（LuCI 前端 + Rust/Tokio 后端单包融合）。
-* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了硬件配套的 [luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini) 与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 插件，其 [luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m?utm_source=gemini) 编入 `MT5700M` 固件。
+* 👤 **[LianXia233](https://github.com/LianXia233?utm_source=gemini)**：提供 [luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700?utm_source=gemini)（编入 `MT5700` 固件的模组管理插件，LuCI 前端 + Rust/Tokio 后端单包融合）与 [luci-app-h5000m-fancontrol](https://github.com/LianXia233/luci-app-h5000m-fancontrol?utm_source=gemini)（风扇温控 Rust 重写版，两套固件共用）。
+* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了硬件配套的 [luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini)（原版，本固件已采用其 Rust 重写演进分支）与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 插件，其 [luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m?utm_source=gemini) 编入 `MT5700M` 固件。
 
 ---
 

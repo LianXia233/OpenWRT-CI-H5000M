@@ -104,8 +104,13 @@ FIX_SINGBOX_STALE_PATCH
 
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
-# H5000M 硬件配套插件（FAN789）
-UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "FAN789/luci-app-h5000m-fancontrol" "main"
+# H5000M 硬件配套插件
+# 风扇控制（2026-10-26 起改用 LianXia233/luci-app-h5000m-fancontrol，FAN789
+# 原版 v2.x shell 控制器的 Rust 重写分支）：v3.x 单包内含 LuCI 前端与零依赖
+# Rust 控制器，且内置 at-webserver 温度桥接（每 30s 经 127.0.0.1:8765 RPC 取
+# AT^CHIPTEMP? 峰值写 /var/run/mt5700m/temperature），无需本仓库再注入桥接；
+# Rust 交叉编译适配见下方 PREPARE_FANCONTROL_PREBUILT 与结构校验。
+UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "LianXia233/luci-app-h5000m-fancontrol" "main"
 UPDATE_PACKAGE "luci-app-h5000m-netmode" "FAN789/luci-app-h5000m-netmode" "main"
 
 # ===== MT5700M 模组管理插件（2026-10-25，两套并存但同一固件只编译一套）=====
@@ -176,6 +181,39 @@ MT5700M_INFO="plugin ${MT5700M_VER} / transport ${MT5700M_TRANSPORT_VER}"
 echo "luci-app-mt5700m version: $MT5700M_INFO"
 [ -n "${GITHUB_ENV:-}" ] && echo "MT5700M_VERSION=$MT5700M_INFO" >> "$GITHUB_ENV"
 
+# ===== luci-app-h5000m-fancontrol 克隆结果校验与版本记录（2026-10-26）=====
+# 风扇插件 v3.x（LianXia233 Rust 重写版）换源后结构有变：新增 src/ Rust 工程与
+# uci-defaults v3，root 下不再有 shell 控制器。上游结构调整、文件改名或漏推时
+# 在此尽早失败，避免数小时后才在编译阶段暴露；同时把版本写入 GITHUB_ENV，
+# 供 Release Notes 引用。
+FANCONTROL_DIR="./luci-app-h5000m-fancontrol"
+FANCONTROL_REQUIRED="Makefile
+src/Makefile
+src/Cargo.toml
+src/Cargo.lock
+src/.cargo/config.toml
+src/src/main.rs
+root/etc/config/h5000m_fancontrol
+root/etc/init.d/h5000m-fancontrol
+root/etc/uci-defaults/91-h5000m-fancontrol-v3
+root/usr/sbin/h5000m-fancontrol-status
+root/usr/share/luci/menu.d/luci-app-h5000m-fancontrol.json
+root/usr/share/rpcd/acl.d/luci-app-h5000m-fancontrol.json
+htdocs/luci-static/resources/view/h5000m/fancontrol.js
+po/zh_Hans/h5000m-fancontrol.po"
+FANCONTROL_MISSING=""
+while read -r FANCONTROL_FILE; do
+	[ -z "$FANCONTROL_FILE" ] && continue
+	[ -f "$FANCONTROL_DIR/$FANCONTROL_FILE" ] || FANCONTROL_MISSING="$FANCONTROL_MISSING $FANCONTROL_FILE"
+done <<< "$FANCONTROL_REQUIRED"
+if [ -n "$FANCONTROL_MISSING" ]; then
+	echo "ERROR: LianXia233/luci-app-h5000m-fancontrol 仓库结构异常，缺少:$FANCONTROL_MISSING" >&2
+	exit 1
+fi
+FANCONTROL_VER=$(sed -n 's/^PKG_VERSION:=//p' "$FANCONTROL_DIR/Makefile" | head -1)
+echo "luci-app-h5000m-fancontrol version: $FANCONTROL_VER"
+[ -n "${GITHUB_ENV:-}" ] && echo "H5000M_FANCONTROL_VERSION=$FANCONTROL_VER" >> "$GITHUB_ENV"
+
 # ===== 深度适配：让包在 buildroot 内使用 CI 预编译的 Rust 后端 =====
 # 固件构建阶段的 PATH 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），
 # 既没有宿主 cargo/rustc，也不适合在 CI 里临时拉起 feeds/packages/lang/rust
@@ -230,140 +268,77 @@ print('luci-app-mt5700: 已注入预编译后端分支')
 PY
 }
 
-# ===== 深度适配：模组温度桥接到 FAN789 风扇插件 =====
-# 旧插件 luci-app-mt5700m 会把 AT^CHIPTEMP? 的峰值温度写入
-# /var/run/mt5700m/temperature（updated= 秒级时间戳 + temperature= 摄氏度），
-# luci-app-h5000m-fancontrol 以该文件为「模组温度」输入（60 秒老化）。
-# 新插件把温度留在自己的后端缓存里、不落这个文件，风扇因此拿不到模组温度。
-# 这里随包附带一个桥接守护：每 30s 经 ubus（mt5700.at）取一次芯片温度，
-# 按旧格式落盘，风扇插件无需改动即可继续工作。
-INJECT_MT5700_TEMP_BRIDGE() {
-	local ROOT_DIR="$MT5700_DIR/root"
+# ===== 深度适配：让风扇插件在 buildroot 内使用 CI 预编译的 Rust 控制器（2026-10-26）=====
+# 与 luci-app-mt5700 同理：固件构建阶段的 PATH 只有交叉工具链（rules.mk 里
+# export PATH:=$(TARGET_PATH)），没有 cargo/rustc，也不适合在 CI 里现场编译
+# feeds/packages/lang/rust 的 host LLVM。风扇插件 v3.x 的控制器是零依赖 Rust
+# crate（.cargo/config.toml 固定 rust-lld，musl 目标自包含静态链接），WRT-CORE.yml
+# 在编译前用 rustup 交叉编译出 aarch64 产物放到 src/prebuilt/h5000m-fancontrol；
+# 这里把上游 src/Makefile 的 compile 目标改成「有预编译产物就直接装，否则回退
+# 上游 cargo 构建」，并把解析期「找不到 cargo 即 $(error)」降级为 $(warning)——
+# 否则 buildroot 阶段 Makefile 在解析时就会失败，预编译分支根本走不到。
+# 上游若调整 compile 规则，下方的结构校验会立刻失败，而不是静默编出旧逻辑。
+PREPARE_FANCONTROL_PREBUILT() {
+	local MAKE_FILE="$FANCONTROL_DIR/src/Makefile"
 
-	mkdir -p "$ROOT_DIR/usr/sbin" "$ROOT_DIR/etc/init.d" "$ROOT_DIR/etc/uci-defaults" || {
-		echo "ERROR: 无法创建温度桥接目录" >&2
-		exit 1
-	}
+	python3 - "$MAKE_FILE" <<'PY'
+import io
+import re
+import sys
 
-	cat > "$ROOT_DIR/usr/sbin/mt5700-temp-bridge" <<'EOF'
-#!/bin/sh
-# MT5700M 模组温度桥接（Hiveton H5000M 定制固件配套脚本，随 luci-app-mt5700 发布）
-#
-# 为什么需要它：
-#   本固件自 2026-10-25 起用 luci-app-mt5700 取代 luci-app-mt5700m。新插件
-#   把 AT^CHIPTEMP? 的温度放在自己的后端缓存里，不再写 FAN789 风扇插件读取的
-#   /var/run/mt5700m/temperature；而风扇插件（luci-app-h5000m-fancontrol）
-#   仍以该文件作为「模组温度」输入（updated= 秒级时间戳，60 秒内有效）。
-#   本脚本按固定间隔经 ubus 向新插件取一次芯片温度，按旧格式落盘，风扇曲线
-#   因此继续拿到模组温度，无需改动风扇插件。
-#
-# 数据流：ubus call mt5700 at '{"cmd":"AT^CHIPTEMP?"}' → 12 路传感器（0.1℃）
-#   → 取最高值（与旧插件 print_temperature 口径一致）→ temperature=<℃>
-#
-# 可调环境变量（一般无需设置）：
-#   MT5700_TEMP_BRIDGE_INTERVAL  轮询间隔秒（默认 30，必须小于风扇插件 60s 老化窗口）
-#   MT5700_TEMP_STATE_DIR        缓存目录（默认 /var/run/mt5700m）
+path = sys.argv[1]
+src = io.open(path, encoding='utf-8').read()
 
-STATE_DIR="${MT5700_TEMP_STATE_DIR:-/var/run/mt5700m}"
-CACHE="${STATE_DIR}/temperature"
-INTERVAL="${MT5700_TEMP_BRIDGE_INTERVAL:-30}"
+if 'H5000M_FANCONTROL_PREBUILT_HOOK' in src:
+    print('luci-app-h5000m-fancontrol: 预编译注入已存在，跳过')
+    sys.exit(0)
 
-command -v jsonfilter >/dev/null 2>&1 || exit 1
-command -v ubus >/dev/null 2>&1 || exit 1
+if re.search(r'^install:', src, re.M) is None:
+    sys.exit('ERROR: src/Makefile 缺少 install 目标，上游结构已变更，需人工复核预编译注入')
 
-parse_chip_temp() {
-	tr -d '\r' | awk -F, '
-		BEGIN {
-			name[1]="sub3g_pa"; name[2]="sub6g_pa"; name[3]="mimo_pa"; name[4]="tcxo"
-			name[5]="peri1"; name[6]="peri2"; name[7]="ap1"; name[8]="ap2"
-			name[9]="modem1"; name[10]="modem2"; name[11]="bbp1"; name[12]="bbp2"
-		}
-		/^\^CHIPTEMP:/ {
-			sub(/^\^CHIPTEMP:[[:space:]]*/, "", $1)
-			for (i = 1; i <= 12 && i <= NF; i++) {
-				value = $i
-				gsub(/[[:space:]]/, "", value)
-				if (value !~ /^-?[0-9]+$/) continue
-				numeric = value + 0
-				if (numeric < -400 || numeric > 1200) continue
-				printf "temp_%s=%.1f\n", name[i], numeric / 10
-				if (!found || numeric > peak) { peak = numeric; peak_name = name[i]; found = 1 }
-			}
-			if (found) {
-				printf "temperature=%.1f\n", peak / 10
-				printf "temperature_sensor=%s\n", peak_name
-			}
-			exit
-		}'
-}
+# 解析期 cargo 缺失检查降级为 warning：预编译分支下 cargo 不在 PATH 是预期状态；
+# 真正回退 cargo 分支时，空的 $(CARGO) 会在命令执行处报错，不会静默通过。
+downgraded, n = re.subn(r'^\$\(error (h5000m-fancontrol: cargo not found in PATH)',
+                       r'$(warning \1', src, flags=re.M)
+if n != 1:
+    sys.exit('ERROR: src/Makefile 的 cargo 缺失检查匹配数量为 %d（期望 1），上游结构已变更' % n)
 
-while :; do
-	raw="$(ubus call mt5700 at '{"cmd":"AT^CHIPTEMP?","_rid":"tempbridge"}' 2>/dev/null)"
-	body="$(printf '%s' "$raw" | jsonfilter -e '@.data' 2>/dev/null)"
-	if [ -n "$body" ]; then
-		out="$(printf '%s\n' "$body" | parse_chip_temp)"
-		value="$(printf '%s\n' "$out" | sed -n 's/^temperature=//p' | head -n 1)"
-		case "$value" in
-			''|*[!0-9.-]*) ;;
-			*)
-				if awk -v v="$value" 'BEGIN { exit !(v >= -40 && v <= 150) }'; then
-					mkdir -p "$STATE_DIR" 2>/dev/null
-					tmp="${CACHE}.$$"
-					if {
-						printf '%s\n' "$out" | grep -E '^(temp_[a-z0-9_]+|temperature)=-?[0-9]+([.][0-9]+)?$|^temperature_sensor=[a-z0-9_]+$'
-						printf 'updated=%s\n' "$(date +%s)"
-					} > "$tmp" 2>/dev/null; then
-						mv -f "$tmp" "$CACHE" 2>/dev/null && chmod 0644 "$CACHE" 2>/dev/null
-					else
-						rm -f "$tmp" 2>/dev/null
-					fi
-					rm -f "$tmp" 2>/dev/null
-				fi
-				;;
-		esac
+new_compile = '''# ==== H5000M_FANCONTROL_PREBUILT_HOOK（本仓库深度适配，勿手改）====
+# buildroot 编译阶段 PATH 内没有 cargo；CI 已用 rustup 交叉编译出静态控制器，
+# 放在 prebuilt/h5000m-fancontrol。存在时直接复制到 $(BINARY)，否则回退上游
+# cargo 构建；两个分支共用下游的产物存在性与 ELF 架构校验。
+compile:
+	@if [ -x "$(CURDIR)/prebuilt/h5000m-fancontrol" ]; then \\
+		echo "==> [h5000m-fancontrol] 使用预编译控制器: $(CURDIR)/prebuilt/h5000m-fancontrol"; \\
+		mkdir -p $(dir $(BINARY)); \\
+		cp -f "$(CURDIR)/prebuilt/h5000m-fancontrol" "$(BINARY)"; \\
+	else \\
+		echo "==> [h5000m-fancontrol] cargo build: ARCH=$(ARCH) RUST_TARGET=$(RUST_TARGET)"; \\
+		$(CARGO) build $(CARGO_FLAGS); \\
 	fi
-	sleep "$INTERVAL"
-done
-EOF
+	@test -x $(BINARY) || { echo 'ERROR: $(BINARY) missing after build' >&2; exit 1; }
+	@if command -v file >/dev/null 2>&1; then \\
+		file $(BINARY) | grep -q '$(FILE_MACHINE_$(RUST_TARGET))' || { \\
+			echo 'ERROR: $(BINARY) is not a $(RUST_TARGET) ELF binary' >&2; \\
+			exit 1; \\
+		}; \\
+	else \\
+		echo 'note: file(1) unavailable, skipping ELF architecture check' >&2; \\
+	fi
 
-	cat > "$ROOT_DIR/etc/init.d/mt5700-temp-bridge" <<'EOF'
-#!/bin/sh /etc/rc.common
-# MT5700M 模组温度桥接服务（随 luci-app-mt5700 一起发布）
-# 作用：把新插件的芯片温度按旧格式写入 /var/run/mt5700m/temperature，
-#       供 luci-app-h5000m-fancontrol 的风扇曲线使用。详见 mt5700-temp-bridge 头部注释。
-START=99
-STOP=10
-USE_PROCD=1
+'''
 
-start_service() {
-	[ -x /usr/sbin/mt5700-temp-bridge ] || return 0
-	procd_open_instance
-	procd_set_param command /usr/sbin/mt5700-temp-bridge
-	procd_set_param respawn 3600 5 5
-	procd_set_param stdout 0
-	procd_set_param stderr 0
-	procd_close_instance
-}
-EOF
+patched, n = re.subn(r'(?ms)^compile:.*?(?=^clean:)', new_compile, downgraded)
+if n != 1:
+    sys.exit('ERROR: src/Makefile 的 compile 目标匹配数量为 %d（期望 1），上游结构已变更' % n)
 
-	cat > "$ROOT_DIR/etc/uci-defaults/93-mt5700-temp-bridge" <<'EOF'
-#!/bin/sh
-# 首启自动注册温度桥接服务（procd 常驻，默认 30s 取一次模组温度）
-[ -x /etc/init.d/mt5700-temp-bridge ] && /etc/init.d/mt5700-temp-bridge enable
-exit 0
-EOF
-
-	chmod 0755 "$ROOT_DIR/usr/sbin/mt5700-temp-bridge" \
-		"$ROOT_DIR/etc/init.d/mt5700-temp-bridge" \
-		"$ROOT_DIR/etc/uci-defaults/93-mt5700-temp-bridge" || {
-		echo "ERROR: 温度桥接脚本设置执行位失败" >&2
-		exit 1
-	}
-	echo "luci-app-mt5700: 已注入模组温度桥接（/var/run/mt5700m/temperature）"
+io.open(path, 'w', encoding='utf-8', newline='\n').write(patched)
+print('luci-app-h5000m-fancontrol: 已注入预编译控制器分支')
+PY
 }
 
 PREPARE_MT5700_PREBUILT
-INJECT_MT5700_TEMP_BRIDGE
+PREPARE_FANCONTROL_PREBUILT
 
 #更新软件包版本
 UPDATE_VERSION() {

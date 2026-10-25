@@ -2,6 +2,68 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-26] 风扇温控换用 LianXia233/luci-app-h5000m-fancontrol（Rust 重写版），移除注入式温度桥
+
+### 背景
+
+原风扇插件 `FAN789/luci-app-h5000m-fancontrol`（v2.1.1，shell 控制器）在模组插件
+换用 `luci-app-mt5700` 后，模组温度只能靠本仓库随包注入的 `mt5700-temp-bridge`
+（`INJECT_MT5700_TEMP_BRIDGE`）经 ubus 桥接。
+[LianXia233/luci-app-h5000m-fancontrol](https://github.com/LianXia233/luci-app-h5000m-fancontrol)
+是其 v3.x 演进分支：控制器重写为零依赖 Rust 静态二进制（rust-lld + musl 自包含链接），
+并**内置** at-webserver 温度桥接——每 30 秒经本地 RPC（`127.0.0.1:8765`，newline-JSON，
+与 at-webserver 默认 `websocket_port` 一致、默认无 auth_key）下发 `AT^CHIPTEMP?`，
+取 12 路峰值按旧格式写回 `/var/run/mt5700m/temperature`。换用该版本后注入式桥接
+冗余，随之移除；`MT5700M` 固件（旧模组插件）下 RPC 查询静默失败，模组温度仍由
+`mt5700m-manager` 写入的同一路径提供，行为与之前一致。
+
+### 变更
+
+- `Scripts/Packages.sh`：
+  - 风扇插件 clone 源 `FAN789/luci-app-h5000m-fancontrol` → `LianXia233/luci-app-h5000m-fancontrol`。
+    包名不变（`Config/GENERAL.txt` 的 `CONFIG_PACKAGE_luci-app-h5000m-fancontrol=y` 无需改动，
+    依赖也一致：`+luci-base +kmod-hwmon-pwmfan`）。
+  - 移除 `INJECT_MT5700_TEMP_BRIDGE()` 及其调用（职责已并入风扇控制器，经 RPC 直连后端）。
+  - 新增 `PREPARE_FANCONTROL_PREBUILT()`：与 `PREPARE_MT5700_PREBUILT()` 同思路，把
+    `src/Makefile` 的 `compile` 目标改成「有 CI 预编译产物直接装、否则回退 cargo」，并把
+    解析期「cargo 缺失即 `$(error)`」降级为 `$(warning)`——否则 buildroot 阶段 Makefile
+    在解析时就失败，预编译分支根本走不到；ELF 架构校验两个分支共用。
+  - 新增克隆结构校验（Makefile / src 工程 / root / po / menu / acl）与版本记录
+    （`H5000M_FANCONTROL_VERSION` 写入 GITHUB_ENV）。
+- `.github/workflows/WRT-CORE.yml`：
+  - 「Smoke Test luci-app-mt5700」：移除温度桥接三件套的检查项（注入已删除）。
+  - 新增「Smoke Test luci-app-h5000m-fancontrol」：结构校验（含预编译注入标记与 cargo
+    告警降级）、shell 语法、LuCI JS 语法与浏览器级渲染冒烟、i18n 完整性、JSON 元数据、
+    上游打包红线 / uci-defaults 迁移 / 内核热保护静态检查（取自其上游 CI，无需 Rust）。
+  - 「Cross Compile Rust Backend」→「Cross Compile Rust Backends」，条件放宽为
+    `WRT_TEST != 'true'`：风扇控制器（零依赖 crate，无需 zig）在 **两套固件** 下都先跑
+    上游 `cargo test` 再交叉编译预装；at-webserver 仍仅 `MT5700` 固件需要，`MT5700M`
+    时跳过 zig 准备与后端编译。
+  - Release Notes 增加「风扇插件版本」行。
+- `README.md` / `index.html`：温度联动改为风扇控制器内置 RPC 桥接的描述；风扇插件
+  章节按 v3.x 重写（Rust 控制器、内核安全兜底、六 TAB 界面）；鸣谢补充 LianXia233
+  的风扇分支。
+
+### 不兼容说明
+
+- 风扇插件 2.x → 3.x：UCI 选项集兼容，随包 `uci-defaults/91-h5000m-fancontrol-v3`
+  按 `schema_version` 迁移（仅补缺、不覆盖已有值）；服务名
+  `/etc/init.d/h5000m-fancontrol`、菜单入口 `admin/system/h5000m_fancontrol`、
+  温度缓存路径与 `key=value` 状态输出（含全部 2.x 键）均不变，旧固件 sysupgrade
+  无感切换。
+- `mt5700-temp-bridge` 三件套不再随固件发布（职责并入风扇控制器）；若有脚本依赖它，
+  需改为读 `/var/run/mt5700m/temperature` 或直接调用 at-webserver RPC。
+- 风扇控制器现为架构相关包（不再是 `all`），与模组插件后端一样依赖 CI 预编译注入。
+
+### 验证
+
+- `bash -n Scripts/Packages.sh` 通过；`PREPARE_FANCONTROL_PREBUILT` 对真实克隆的
+  LianXia233/luci-app-h5000m-fancontrol 实测：cargo `$(error)` 降级 1 处、`compile`
+  目标替换 1 处、重复执行幂等跳过，生成 Makefile 的 recipe 为真实 TAB、LF 行尾。
+- 上游 `tests/test-packaging.sh` 的 Makefile 断言（`aarch64-unknown-linux-musl` 映射、
+  `FILE_MACHINE_` 架构校验行）在注入后仍全部满足。
+- workflow YAML 解析通过；两套固件（MT5700 / MT5700M）的 Rust 预编译路径均覆盖。
+
 ## [2026-10-25] 一次构建固定产出两套固件（MT5700 + MT5700M）
 
 ### 背景
