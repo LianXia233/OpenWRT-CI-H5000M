@@ -5,17 +5,15 @@ CONFIG_PACKAGE_luci-app-homeproxy=y
 CONFIG_PACKAGE_luci-app-h5000m-fancontrol=y
 # H5000M 网络模式
 CONFIG_PACKAGE_luci-app-h5000m-netmode=y
-# MT5700M 主插件（LianXia233/luci-app-mt5700，含 LuCI 前端与 Rust/Tokio 后端）
-# 2026-10-25 起取代 FAN789/luci-app-mt5700m：两者都独占模组 AT 串口，不可共存，
-# 本固件只保留新插件（旧包已在 Scripts/Packages.sh 中移除并断言不存在）。
-CONFIG_PACKAGE_luci-app-mt5700=y
-# MT5700M 中文语言（与主包同批安装，语言包依赖主包）
-CONFIG_PACKAGE_luci-i18n-mt5700-zh-cn=y
-# MT5700M 运行时依赖
+# MT5700M 模组管理插件（两套二选一，不在本文件里定死）
+#   新插件：Config/MT5700.txt   → LianXia233/luci-app-mt5700（LuCI + Rust/Tokio 后端）
+#   旧插件：Config/MT5700M.txt  → FAN789/luci-app-mt5700m（LuCI + 原生 C 传输程序）
+# 构建时由 WRT_MODEM 选择其中一份追加进 .config，并在 make defconfig 之后强制校验
+# 「两套插件的主包只能有一个为 y」——两者都独占模组 AT 串口，同时启用必然互相抢口。
+# MT5700M 运行时依赖（两套插件共用）
 # odhcp6c：蜂窝 IPv6（DHCPv6 租约 / 前缀下发）必需
-# nc 与 timeout：插件经 rpcd ucode 用 `nc 127.0.0.1 <port>` 访问本地后端，
-#   二者均来自 busybox 默认配置（NC/TIMEOUT 默认 y），故无需额外选包；
-#   flock 已移除——串口互斥由 Rust 后端内部完成，旧插件的 transport 锁不再需要
+# nc 与 timeout：新插件经 rpcd ucode 用 `nc 127.0.0.1 <port>` 访问本地后端，
+#   二者均来自 busybox 默认配置（NC/TIMEOUT 默认 y），故无需额外选包
 CONFIG_PACKAGE_odhcp6c=y
 
 # EasyTier 插件

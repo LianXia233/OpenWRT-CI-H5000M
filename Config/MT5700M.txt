@@ -1,0 +1,12 @@
+# MT5700M 模组管理 —— 旧插件（FAN789/luci-app-mt5700m）
+# LuCI 前端 + 原生 C 传输程序 mt5700m-transport，入口「网络 → MT5700M 5G 模组」。
+#
+# 与 Config/MT5700.txt 二选一：两者都独占 MT5700M 的 AT 串口，同一份 .config
+# 不允许同时启用两套插件。CI 在 make defconfig 之后强制校验「两套主包只有一个为 y」，
+# 同时为 y 或同时为 n 都会直接失败。
+CONFIG_PACKAGE_luci-app-mt5700m=y
+# 语言包依赖主包，必须同批安装
+CONFIG_PACKAGE_luci-i18n-mt5700m-zh-cn=y
+# 旧插件运行时依赖：flock 用于串行化 AT 操作
+# （新插件由 Rust 后端内部互斥，不需要该包，故只在旧插件配置里启用）
+CONFIG_PACKAGE_flock=y

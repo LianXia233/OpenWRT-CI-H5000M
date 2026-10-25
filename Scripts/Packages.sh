@@ -108,21 +108,21 @@ UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "FAN789/luci-app-h5000m-fancontrol" "main"
 UPDATE_PACKAGE "luci-app-h5000m-netmode" "FAN789/luci-app-h5000m-netmode" "main"
 
-# MT5700M 模组主插件（LianXia233/luci-app-mt5700）
-# 该仓库顶层即包定义（Makefile + htdocs + po + root + src），单包内含 LuCI 前端
-# 与 Rust/Tokio 后端（at-webserver-rust），clone 后目录名正好是包名，无需二次整理。
+# ===== MT5700M 模组管理插件（2026-10-25，两套并存但同一固件只编译一套）=====
+# 两套插件都 clone 到 package 树，具体编译哪一套由 Config/MT5700.txt（新插件）或
+# Config/MT5700M.txt（旧插件）决定，WRT_MODEM 选择其一追加进 .config。
+# 两者都独占 MT5700M 的 AT 串口（新插件由 Rust 后端持有串口，旧插件由
+# mt5700m-transport 持有），同一份 .config 里绝不能同时启用，否则必然互相抢口、
+# 随机出现「命令超时 / 模组无响应」。WRT-CORE.yml 在 make defconfig 之后强制校验
+# 「两套主包只有一个为 y」，违反即失败。
+#
+# 旧插件 FAN789/luci-app-mt5700m：仓库顶层含 luci-app-mt5700m 与 mt5700m-transport
+# 两个包，clone 后目录名 luci-app-mt5700m，被 immortalwrt 的 SCAN_DEPTH 正常扫描。
+UPDATE_PACKAGE "luci-app-mt5700m" "FAN789/luci-app-mt5700m" "main"
+# 新插件 LianXia233/luci-app-mt5700：该仓库顶层即包定义（Makefile + htdocs + po +
+# root + src），单包内含 LuCI 前端与 Rust/Tokio 后端（at-webserver-rust），clone 后
+# 目录名正好是包名，无需二次整理。
 UPDATE_PACKAGE "luci-app-mt5700" "LianXia233/luci-app-mt5700" "main"
-
-# ===== 与旧插件 FAN789/luci-app-mt5700m 互斥（2026-10-25）=====
-# 两者都通过独占 MT5700M AT 串口工作（新插件由 Rust 后端持有串口，旧插件由
-# mt5700m-transport 持有），同时安装必然互相抢口、随机出现「命令超时 / 模组无响应」。
-# 因此本固件固定只保留 luci-app-mt5700：先删掉可能残留在 package 树的旧包目录，
-# 再确认它确实不存在（防止后续有人恢复 clone 行时静默并存）。
-rm -rf ./luci-app-mt5700m
-if [ -d ./luci-app-mt5700m ]; then
-	echo "ERROR: 旧插件 luci-app-mt5700m 无法移除，它与 luci-app-mt5700 互斥" >&2
-	exit 1
-fi
 
 # ===== luci-app-mt5700 克隆结果校验与版本记录（2026-10-25）=====
 # 上游仓库结构调整、文件改名或漏推时在此尽早失败，避免数小时后才在编译阶段暴露。
@@ -153,6 +153,28 @@ MT5700_BACKEND_VER=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1
 MT5700_INFO="plugin ${MT5700_VER} / backend ${MT5700_BACKEND_VER}"
 echo "luci-app-mt5700 version: $MT5700_INFO"
 [ -n "${GITHUB_ENV:-}" ] && echo "MT5700_VERSION=$MT5700_INFO" >> "$GITHUB_ENV"
+
+# ===== luci-app-mt5700m（旧插件）克隆结果校验与版本记录 =====
+# 旧插件不在本固件默认启用，但仍要保证：一旦改用 Config/MT5700M.txt，clone 出来的
+# 两个包结构完整，否则会在编译阶段才报错。
+MT5700M_DIR="./luci-app-mt5700m"
+for MT5700M_FILE in \
+	luci-app-mt5700m/Makefile \
+	mt5700m-transport/Makefile \
+	mt5700m-transport/src/transport.c \
+	luci-app-mt5700m/root/usr/sbin/mt5700m-manager \
+	luci-app-mt5700m/root/etc/init.d/mt5700m-manager \
+	luci-app-mt5700m/po/zh_Hans/mt5700m.po; do
+	if [ ! -f "$MT5700M_DIR/$MT5700M_FILE" ]; then
+		echo "ERROR: FAN789/luci-app-mt5700m 仓库结构异常，缺少 $MT5700M_FILE" >&2
+		exit 1
+	fi
+done
+MT5700M_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700M_DIR/luci-app-mt5700m/Makefile" | head -1)
+MT5700M_TRANSPORT_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700M_DIR/mt5700m-transport/Makefile" | head -1)
+MT5700M_INFO="plugin ${MT5700M_VER} / transport ${MT5700M_TRANSPORT_VER}"
+echo "luci-app-mt5700m version: $MT5700M_INFO"
+[ -n "${GITHUB_ENV:-}" ] && echo "MT5700M_VERSION=$MT5700M_INFO" >> "$GITHUB_ENV"
 
 # ===== 深度适配：让包在 buildroot 内使用 CI 预编译的 Rust 后端 =====
 # 固件构建阶段的 PATH 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），

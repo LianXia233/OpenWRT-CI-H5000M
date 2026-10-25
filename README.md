@@ -54,7 +54,9 @@ OpenWRT-CI-H5000M/
 │   └── Cache-Clean.yml       # Actions 依赖缓存定时清理
 ├── Config/
 │   ├── GENERAL.txt           # 全局内核模块、网络协议栈与 H5000M 专属插件清单
-│   └── MEDIATEK-WIFI-YES.txt # 针对 Hiveton H5000M 设备的 Target 与 Wi-Fi 驱动配置
+│   ├── MEDIATEK-WIFI-YES.txt # 针对 Hiveton H5000M 设备的 Target 与 Wi-Fi 驱动配置
+│   ├── MT5700.txt            # 模组插件选项一：luci-app-mt5700（默认）
+│   └── MT5700M.txt           # 模组插件选项二：luci-app-mt5700m（与选项一互斥）
 ├── Scripts/
 │   ├── Packages.sh          # 第三方扩展插件源同步与版本拉取
 │   ├── Handles.sh           # HomeProxy 等网络组件预置与冲突修复
@@ -92,7 +94,21 @@ OpenWRT-CI-H5000M/
 
 ## 🧩 二、 核心专属 5G CPE 插件
 
-固件深度集成两套硬件级适配套件：模组管理由 **LianXia233/luci-app-mt5700** 提供（单包内含 LuCI 前端与 Rust/Tokio 常驻后端），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
+固件深度集成两套硬件级适配套件：模组管理提供 **两套可选插件**（默认 `luci-app-mt5700`），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
+
+### 🎛️ 模组插件二选一：`MT5700`（默认）/ `MT5700M`
+
+两套插件都独占 MT5700M 的 AT 串口，**同一份 `.config` 只能启用其中一个**：
+
+| 选项 | 插件 | 形态 | 配置文件 |
+| :--- | :--- | :--- | :--- |
+| `MT5700`（默认） | [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700) | LuCI 前端 + Rust/Tokio 常驻后端，12 个页面 | `Config/MT5700.txt` |
+| `MT5700M` | [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m) | LuCI 前端 + 原生 C 传输程序 `mt5700m-transport` | `Config/MT5700M.txt` |
+
+* 手动触发 `WRT-BUILD` / `MTK-AUTO` 时用 **MODEM** 下拉框选择；定时构建未指定时默认 `MT5700`。
+* 两套插件源码都会 clone 到 `package/`，只有被选中的那套参与编译。
+* CI 在 `make defconfig` 之后强制校验：两套主包同时为 `y`、或与所选 `MODEM` 不一致、或缺配套语言包，都会立刻失败（防止固件里出现两套抢同一串口的插件）。
+* 两者都**不能**与 QModem 等同样占用模组串口的服务共存。
 
 ### 1. MT5700M 5G 模组管理（`luci-app-mt5700`）
 
@@ -113,7 +129,15 @@ OpenWRT-CI-H5000M/
 * 🛠️ **构建方式（本仓库深度适配）**：后端为静态 musl 二进制，CI 在编译固件前用 rustup + zig 交叉编译出 aarch64 产物并交给包内预编译分支安装——buildroot 编译阶段没有 cargo，也不需要在 CI 里现编 host rust（详见更新日志）。
 
 > [!IMPORTANT]
-> **与 `FAN789/luci-app-mt5700m`、QModem 不兼容。** 三者都独占同一 AT 串口，同时安装会互相抢口，表现为 AT 指令超时、拨号状态来回跳、模组「无响应」。本固件自 2026-10-25 起只保留 `luci-app-mt5700`：旧插件已从构建中移除（`Scripts/Packages.sh` 会强制删除并断言其不存在），QModem 的 clone 行亦保持注释状态。请勿再从软件源手工安装其他占用同一串口的模组管理服务。
+> **与旧插件 `luci-app-mt5700m`、QModem 不兼容。** 三者都独占同一 AT 串口，同时安装会互相抢口，表现为 AT 指令超时、拨号状态来回跳、模组「无响应」。本仓库通过「一次构建只启用一套」来避免这个问题（见上文二选一说明），请勿在固件装好后再从软件源手工加装另一套。
+
+#### 备选：`luci-app-mt5700m`（选项 `MT5700M`）
+
+需要旧插件的能力（原生 C 传输程序 `mt5700m-transport`、`/etc/mt5700m/traffic-history` 流量历史、链路健康自愈）时，把 `MODEM` 选为 `MT5700M`（或直接改用 `Config/MT5700M.txt`）：
+
+* 入口同样是「网络 → MT5700M 5G 模组」，运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件。
+* 该选项下不会编译 `luci-app-mt5700`，温度桥接脚本也不会进入固件（它只随新插件打包）；语言包为 `luci-i18n-mt5700m-zh-cn`。
+* 旧插件额外依赖 `flock`（该依赖只在 `Config/MT5700M.txt` 中启用）。
 
 ### 2. 硬件级智能风扇温控 (`luci-app-h5000m-fancontrol`)
 

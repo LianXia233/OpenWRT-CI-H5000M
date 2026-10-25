@@ -29,6 +29,14 @@ on:
         default: 'owrt'
         required: true
         type: string
+      MODEM:
+        description: 'MT5700M 模组管理插件（两者独占 AT 串口，只能二选一）'
+        default: 'MT5700'
+        required: true
+        type: choice
+        options:
+          - MT5700
+          - MT5700M
       PACKAGE:
         description: '手动调整插件包，多个请用换行隔开'
         required: false
@@ -69,6 +77,8 @@ jobs:
       WRT_BRANCH: ${{ inputs.BRANCH }}
       # 源码名称
       WRT_SOURCE: ${{ inputs.SOURCE }}
+      # 模组插件二选一
+      WRT_MODEM: ${{ inputs.MODEM }}
       # 插件调整
       WRT_PACKAGE: ${{ inputs.PACKAGE }}
       # 仅输出配置文件

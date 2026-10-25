@@ -2,41 +2,50 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
-## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（取代 FAN789/luci-app-mt5700m）
+## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（旧插件保留为可选项，二选一编译）
 
 ### 背景
 
-模组管理插件切换为 [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700)
+新增模组管理插件 [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700)
 （当前 v1.30.4，后端 `at-webserver` 1.29.0）：单包融合 LuCI 前端（12 个页面）与
 Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
 `nc 127.0.0.1 <port>` 调后端 JSON-RPC，服务 `/etc/init.d/at-webserver`、
 配置 `/etc/config/at-webserver`，入口 `网络 → 移动网络 → 5G 模组管理`。
 
-直接 clone 接入会踩三个坑，故本次做深度适配：
+旧插件 `FAN789/luci-app-mt5700m` **保留**（其原生 C 传输程序、流量历史与链路自愈仍有
+使用场景），两套插件各自保留完整编译配置，但同一份 `.config` 只能启用其中一套。
+直接接入会踩三个坑，故本次做深度适配：
 
 1. **Rust 后端无法在 buildroot 内编译**：`rules.mk` 在包编译阶段
    `export PATH:=$(TARGET_PATH)`，PATH 里没有 `~/.cargo/bin`；改用
    `feeds/packages/lang/rust` 的 host rust 需现场编译 LLVM（1~2 小时、约 20GB 磁盘）。
-2. **与现有插件争抢 AT 串口**：旧插件 `luci-app-mt5700m`（`mt5700m-transport`
-   持有串口）与本插件（Rust 后端持有串口）互斥，并存必然随机超时。
+2. **两套插件争抢 AT 串口**：旧插件由 `mt5700m-transport` 持有串口，新插件由
+   Rust 后端持有，同时启用必然随机超时，必须在配置层强制二选一。
 3. **风扇温控失去模组温度**：`luci-app-h5000m-fancontrol` 读
    `/var/run/mt5700m/temperature`（`updated=` 秒级时间戳 + `temperature=`，60 秒老化），
    该文件由旧插件的 `mt5700m-manager` 维护；新插件把温度留在自己的后端缓存里。
 
 ### 变更
 
+- `Config/`：
+  - 新增 `Config/MT5700.txt`（新插件：`luci-app-mt5700` + `luci-i18n-mt5700-zh-cn`）
+    与 `Config/MT5700M.txt`（旧插件：`luci-app-mt5700m` +
+    `luci-i18n-mt5700m-zh-cn` + `flock`），两套编译配置并存。
+  - `Config/GENERAL.txt` 不再写死模组插件包，只保留两套插件共用的 `odhcp6c`
+    （蜂窝 IPv6 租约），并注明 `nc` / `timeout` 来自 busybox 默认配置
+    （`BUSYBOX_DEFAULT_NC` / `TIMEOUT` 默认 y）、`luci-base` 已带 `rpcd` +
+    `rpcd-mod-ucode` + ucode 模块，无需额外选包。
 - `Scripts/Packages.sh`：
-  - 移除 `UPDATE_PACKAGE "luci-app-mt5700m" "FAN789/luci-app-mt5700m" "main"`，
-    新增 `UPDATE_PACKAGE "luci-app-mt5700" "LianXia233/luci-app-mt5700" "main"`；
-    删除 `qmodem`（FUjr/QModem）clone 行——该行此前与注释不一致，实际仍在
-    clone，且 QModem 同样争抢串口。
-  - 新增互斥清理：`rm -rf ./luci-app-mt5700m` 后断言目录不存在，防止日后有人
-    恢复 clone 行时静默并存。
-  - 新增克隆结构校验（`Makefile`、`src/Makefile`、`src/rust/{Cargo.toml,Cargo.lock}`、
-    `root/etc/init.d/at-webserver`、`root/etc/config/at-webserver`、
-    `root/usr/share/rpcd/ucode/mt5700.uc`、menu.d / acl.d JSON、
-    一个 htdocs 视图、`po/zh_Hans/luci-app-mt5700.po`），并把版本写入
-    `GITHUB_ENV` 的 `MT5700_VERSION`（插件版本 / 后端版本）。
+  - 两套插件**都 clone**：恢复 `UPDATE_PACKAGE "luci-app-mt5700m"
+    "FAN789/luci-app-mt5700m" "main"`，新增 `UPDATE_PACKAGE "luci-app-mt5700"
+    "LianXia233/luci-app-mt5700" "main"`；删除 `qmodem`（FUjr/QModem）clone 行
+    ——该行此前与注释不一致，实际仍在 clone，且 QModem 同样争抢串口。
+  - 分别做克隆结构校验：新插件 11 个必需文件（`src/Makefile`、
+    `src/rust/{Cargo.toml,Cargo.lock}`、init.d、config、ucode、menu.d/acl.d、
+    一个 htdocs 视图、po）；旧插件 6 个必需文件（两个 Makefile、
+    `transport.c`、`mt5700m-manager`、init.d、po）。
+  - 版本分别写入 `GITHUB_ENV` 的 `MT5700_VERSION`（插件 / 后端）与
+    `MT5700M_VERSION`（插件 / transport）。
   - `PREPARE_MT5700_PREBUILT()`：幂等改写 `src/Makefile` 的 `compile` 目标——
     存在 `src/prebuilt/at-webserver` 时直接复制到 `$(BIN)`，否则回退上游
     `cargo build`；带 `MT5700_PREBUILT_HOOK` 标记，`re.subn` 命中数不为 1 或
@@ -46,37 +55,44 @@ Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
     取峰值，按旧格式原子写入 `/var/run/mt5700m/temperature`）、
     `root/etc/init.d/mt5700-temp-bridge`（procd，START=99）与
     `root/etc/uci-defaults/93-mt5700-temp-bridge`（首次启动 enable）。
-- `Config/GENERAL.txt`：`CONFIG_PACKAGE_luci-app-mt5700m` /
-  `CONFIG_PACKAGE_luci-i18n-mt5700m-zh-cn` 改为 `luci-app-mt5700` /
-  `luci-i18n-mt5700-zh-cn`；移除 `CONFIG_PACKAGE_flock`（串口互斥已由 Rust
-  后端内部完成）；保留 `odhcp6c`（蜂窝 IPv6 租约）；注释说明 `nc` / `timeout`
-  由 busybox 默认配置提供（`BUSYBOX_DEFAULT_NC` / `TIMEOUT` 默认 y），
-  无需额外选包，`luci-base` 已带 `rpcd` + `rpcd-mod-ucode` + ucode 模块。
+    这些文件只随新插件打包，选旧插件时不会进固件。
 - `.github/workflows/WRT-CORE.yml`：
-  - `Smoke Test MT5700M Package` 整体替换为 `Smoke Test luci-app-mt5700`：
-    深度适配注入校验（`MT5700_PREBUILT_HOOK`、温度桥接三件套、可执行位）、
-    9 个 shell 脚本 `sh -n`、全部 htdocs JS `node --check`、10 个上游回归测试、
-    menu.d / acl.d `jq empty`、翻译用 **`po2lmo` 编译校验**（上游 po 有 2 处
-    重复 msgid，`msgfmt --check` 会判 fatal，而 luci.mk 实际用 po2lmo 编译 lmo，
-    故从 feed 的 `luci-base/src` 现场构建 po2lmo，口径与打包一致）。
+  - 新增 `workflow_call` 输入 `WRT_MODEM`（`MT5700` / `MT5700M`，未传时默认
+    `MT5700`）。
+  - `Custom Settings` 只追加 `Config/${WRT_MODEM}.txt` 这一份插件配置；
+    `make defconfig` 后做**互斥校验**——两套主包同时为 `y`、与所选
+    `WRT_MODEM` 不一致、或缺配套语言包，全部立即 `exit 1`（无论问题来自配置文件
+    还是 `WRT_PACKAGE` 手工追加）。
+  - 原有 smoke test 改名 `Smoke Test luci-app-mt5700` 并加
+    `if: env.WRT_MODEM != 'MT5700M'`；同时恢复旧插件的
+    `Smoke Test luci-app-mt5700m`（原先的 shell 语法 / 回归、`transport.c`
+    `-Werror` 编译与模拟测试、可执行位、JS 语法、UI/短信、JSON、msgfmt 全套），
+    以 `if: env.WRT_MODEM == 'MT5700M'` 触发。
   - 新增 `Cross Compile Rust Backend` 步骤（`Custom Settings` 之后、
-    `Download Packages` 之前）：从 `.config` 读 `CONFIG_TARGET_ARCH_PACKAGES`，
-    非 `aarch64_cortex-a53` 直接失败（目标架构不符会「装得上、跑不起来」）；
-    rustup 安装 `aarch64-unknown-linux-musl` target，pip 安装 `ziglang==0.13.0`
-    作交叉链接器（含 cc-rs 兼容包装：丢弃外部 `--target=`、过滤
-    `--fix-cortex-a53-843419`），`cargo build --release --locked` 后校验
-    「ARM aarch64 / statically linked / 无动态段 / 体积 > 1MB」，再拷到
-    `package/luci-app-mt5700/src/prebuilt/at-webserver`。
-  - Release Notes 版本行 `MT5700M 插件版本` 改取 `MT5700_VERSION`。
-- `README.md` / `index.html`：插件章节改写为 `luci-app-mt5700`（12 页面矩阵、
-    服务与配置路径、温度桥接、预编译后端构建方式），并显式标注与
-    `luci-app-mt5700m`、QModem 不兼容；鸣谢补充 LianXia233。
+    `Download Packages` 之前，仅在选新插件且非 TEST 时执行）：从 `.config` 读
+    `CONFIG_TARGET_ARCH_PACKAGES`，非 `aarch64_cortex-a53` 直接失败（目标架构
+    不符会「装得上、跑不起来」）；rustup 安装 `aarch64-unknown-linux-musl`
+    target，pip 安装 `ziglang==0.13.0` 作交叉链接器（含 cc-rs 兼容包装：丢弃
+    外部 `--target=`、过滤 `--fix-cortex-a53-843419`），
+    `cargo build --release --locked` 后校验「ARM aarch64 / statically linked /
+    无动态段 / 体积 > 1MB」，再拷到 `package/luci-app-mt5700/src/prebuilt/at-webserver`。
+  - 新插件的翻译校验用 **`po2lmo` 编译**而非 `msgfmt --check`：上游 po 有 2 处
+    重复 msgid（`msgfmt --check` 判 fatal），而 luci.mk 实际用 po2lmo 编译 lmo，
+    故从 feed 的 `luci-base/src` 现场构建 po2lmo，口径与打包一致。
+  - Release Notes 版本行改取 `MT5700_PLUGIN_VERSION`（按 `WRT_MODEM` 取对应版本串）。
+- `.github/workflows/WRT-BUILD.yml` / `MTK-AUTO.yml`：新增 `MODEM` 下拉选择
+  （默认 `MT5700`）并透传为 `WRT_MODEM`。
+- `README.md` / `index.html`：新增「模组插件二选一」说明（两套配置、选择方式、
+  互斥规则），插件章节更新为 `luci-app-mt5700`（12 页面矩阵、服务与配置路径、
+  温度桥接、预编译后端构建方式），并补充旧插件作为备选的适用场景。
 
 ### 不兼容说明
 
 `luci-app-mt5700`、`luci-app-mt5700m`、QModem 都独占 MT5700M 的 AT 串口，
-三者两两不能共存。本固件固定只保留 `luci-app-mt5700`，请勿再从软件源手工安装
-其余两者；如需回退，必须先把新插件 `stop` 或卸载，再装旧插件，反之亦然。
+三者两两不能共存。本仓库通过「一次构建只启用一套」保证产物里只有一套插件：
+两套配置（`Config/MT5700.txt` / `Config/MT5700M.txt`）都保留，但同一份 `.config`
+不允许同时启用，CI 会强制拦截。选购固件或自行编译时请只选其一；装好固件后
+也不要再从软件源手工加装另一套。
 
 ### 验证
 
@@ -87,8 +103,12 @@ Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
 - 上游 10 个 node 回归测试全部通过；htdocs JS `node --check` 全部通过；
   menu.d / acl.d `jq empty` 通过；9 个 shell 脚本 `sh -n` 通过；
   `po2lmo` 编译 `po/zh_Hans/luci-app-mt5700.po` 成功产出 lmo。
+- 互斥校验用三种 `.config` 实测：仅新插件（1/0）、仅旧插件（0/1）通过，
+  两者同时为 y（1/1）被拦截。
+- 三个 workflow 均通过 YAML 解析与 `bash -n`；`Scripts/Packages.sh` 通过 `bash -n`。
 - 待实机验证：`/etc/init.d/at-webserver` 拉起后端、`admin/modem/5g` 菜单渲染、
-  风扇插件读到 `mt5700-temp-bridge` 写入的温度、`MT5700M` 接口自动创建。
+  风扇插件读到 `mt5700-temp-bridge` 写入的温度、`MT5700M` 接口自动创建；
+  以及选 `MT5700M` 时旧插件路径的构建产物。
 
 ### 备注
 

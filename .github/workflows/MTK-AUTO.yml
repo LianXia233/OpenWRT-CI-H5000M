@@ -13,6 +13,14 @@ on:
   # 也可手动触发
   workflow_dispatch:
     inputs:
+      MODEM:
+        description: 'MT5700M 模组管理插件（两者独占 AT 串口，只能二选一）。'
+        default: 'MT5700'
+        required: false
+        type: choice
+        options:
+          - MT5700
+          - MT5700M
       PACKAGE:
         description: '手动调整插件包，多个请用换行隔开。'
         required: false
@@ -51,5 +59,6 @@ jobs:
       WRT_BRANCH: ${{ matrix.BRANCH }}
       WRT_SOURCE: ${{ matrix.SOURCE }}
 
+      WRT_MODEM: ${{ inputs.MODEM }}
       WRT_PACKAGE: ${{ inputs.PACKAGE }}
       WRT_TEST: ${{ inputs.TEST }}

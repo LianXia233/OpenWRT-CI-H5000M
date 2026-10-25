@@ -43,6 +43,13 @@ on:
       WRT_TEST:
         required: false
         type: string
+      WRT_MODEM:
+        # MT5700M 模组管理插件二选一：MT5700 = LianXia233/luci-app-mt5700，
+        # MT5700M = FAN789/luci-app-mt5700m。两者都独占同一 AT 串口，
+        # 同一份 .config 只能启用其中一个（下面 Custom Settings 会强制校验）。
+        required: false
+        type: string
+        default: MT5700
 
 env:
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
@@ -58,6 +65,8 @@ env:
   WRT_SOURCE: ${{inputs.WRT_SOURCE}}
   WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
   WRT_TEST: ${{inputs.WRT_TEST}}
+  # 未传入（如定时构建）时默认新插件
+  WRT_MODEM: ${{inputs.WRT_MODEM || 'MT5700'}}
 
 jobs:
   core:
@@ -231,11 +240,14 @@ jobs:
           $GITHUB_WORKSPACE/Scripts/Handles.sh
 
       - name: Smoke Test luci-app-mt5700
+        # 仅当 WRT_MODEM=MT5700（新插件）时执行；选旧插件时由下一步的
+        # luci-app-mt5700m 测试负责。
         # 在耗时编译前，对刚 clone 的 LianXia233/luci-app-mt5700 做结构校验、
         # 语法检查与上游回归测试（用例取自其 .github/workflows/build-openwrt.yml）。
         # 上游改动、脚本语法错误、深度适配注入失效都在这里尽早暴露，而不是
         # 数小时后才在 Compile Firmware 里失败。
         # runner 自带 node / jq / gcc；gettext 已在 Initialization Environment 安装。
+        if: env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/package/luci-app-mt5700
 
@@ -312,14 +324,95 @@ jobs:
 
           echo "luci-app-mt5700 package smoke test: ALL PASSED"
 
+      - name: Smoke Test luci-app-mt5700m
+        # 仅当 WRT_MODEM=MT5700M（旧插件）时执行，检查内容取自其上游
+        # .github/workflows/ci.yml：shell 语法与回归测试、原生传输程序编译与
+        # 模拟 modem 测试、可执行位、LuCI JS 语法、UI 错误处理与短信解码、
+        # menu/acl JSON、翻译文件。
+        if: env.WRT_MODEM == 'MT5700M'
+        run: |
+          cd ./wrt/package/luci-app-mt5700m
+
+          echo "==> Shell 语法检查"
+          for SH in \
+            luci-app-mt5700m/root/etc/hotplug.d/usb/60-mt5700m \
+            luci-app-mt5700m/root/etc/init.d/mt5700m-manager \
+            luci-app-mt5700m/root/etc/init.d/mt5700m-traffic \
+            luci-app-mt5700m/root/etc/hotplug.d/net/95-mt5700m-traffic \
+            luci-app-mt5700m/root/etc/uci-defaults/90-mt5700m \
+            luci-app-mt5700m/root/etc/uci-defaults/92-mt5700m-traffic \
+            luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m \
+            luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m-traffic \
+            luci-app-mt5700m/root/usr/sbin/mt5700m-at \
+            luci-app-mt5700m/root/usr/sbin/mt5700m-read \
+            luci-app-mt5700m/root/usr/sbin/mt5700m-manager \
+            luci-app-mt5700m/root/usr/sbin/mt5700m-traffic \
+            luci-app-mt5700m/root/usr/share/mt5700m/usb.sh \
+            luci-app-mt5700m/root/usr/share/mt5700m/health.sh \
+            luci-app-mt5700m/root/usr/share/mt5700m/lock.sh \
+            luci-app-mt5700m/root/usr/share/mt5700m/profile.sh; do
+            sh -n "$SH"
+          done
+
+          echo "==> Shell 回归测试"
+          sh luci-app-mt5700m/tests/test-usb-detection.sh
+          sh luci-app-mt5700m/tests/test-temperature-cache.sh
+          sh luci-app-mt5700m/tests/test-read-cache.sh
+          sh luci-app-mt5700m/tests/test-command-contract.sh
+          sh luci-app-mt5700m/tests/test-hotplug-debounce.sh
+          sh luci-app-mt5700m/tests/test-traffic-interface.sh
+
+          echo "==> 原生传输程序编译与模拟测试"
+          gcc -O2 -Wall -Wextra -Werror mt5700m-transport/src/transport.c -o /tmp/mt5700m-transport-test
+          TRANSPORT_BIN=/tmp/mt5700m-transport-test python3 mt5700m-transport/tests/test_transport.py -v
+
+          echo "==> 可执行位检查"
+          test -x luci-app-mt5700m/root/usr/sbin/mt5700m-read
+          test -x luci-app-mt5700m/root/usr/sbin/mt5700m-traffic
+          test -x luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m-traffic
+          test -x luci-app-mt5700m/root/etc/init.d/mt5700m-traffic
+          test -x luci-app-mt5700m/root/etc/hotplug.d/net/95-mt5700m-traffic
+          test -x luci-app-mt5700m/root/etc/uci-defaults/92-mt5700m-traffic
+
+          echo "==> LuCI JavaScript 语法检查"
+          find luci-app-mt5700m/htdocs -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
+          echo "==> UI 错误处理与短信解码测试"
+          node tests/test-ui-errors.js
+          node tests/test-sms-decode.js
+          sh tests/test-action-lock.sh
+          sh tests/test-sms-jobs.sh
+          sh tests/test-health.sh
+          sh tests/test-profile-rollback.sh
+          node tests/test-sms-ui.js
+
+          echo "==> JSON 元数据校验"
+          jq empty luci-app-mt5700m/root/usr/share/luci/menu.d/luci-app-mt5700m.json
+          jq empty luci-app-mt5700m/root/usr/share/rpcd/acl.d/luci-app-mt5700m.json
+
+          echo "==> 翻译文件校验"
+          msgfmt --check --check-format -o /dev/null luci-app-mt5700m/po/zh_Hans/mt5700m.po
+
+          echo "MT5700M package smoke test: ALL PASSED"
+
       - name: Custom Settings
         run: |
           cd ./wrt/
 
+          # MT5700M 模组管理插件二选一：只追加被选中的那份插件配置
+          # （Config/MT5700.txt = 新插件 luci-app-mt5700；Config/MT5700M.txt = 旧插件
+          #  luci-app-mt5700m）。两者都独占同一 AT 串口，同时启用必然互相抢口。
+          MODEM_CFG="$GITHUB_WORKSPACE/Config/${WRT_MODEM}.txt"
+          if [ ! -f "$MODEM_CFG" ]; then
+            echo "::error::WRT_MODEM=$WRT_MODEM 没有对应配置，可选 MT5700 / MT5700M（需存在 Config/\$WRT_MODEM.txt）"
+            exit 1
+          fi
+          echo "模组插件配置：$MODEM_CFG"
+
           if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
-            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
+            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt "$MODEM_CFG" >> .config
           else
-            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
+            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt "$MODEM_CFG" >> .config
           fi
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
@@ -343,7 +436,44 @@ jobs:
             fi
           fi
 
-          make defconfig -j$(nproc) && make clean -j$(nproc)
+          make defconfig -j$(nproc)
+
+          # 互斥校验：两套 MT5700 插件独占同一 AT 串口，同一份 .config 里
+          # 只能有一个主包为 y。这里以 defconfig 之后的最终 .config 为准，
+          # 因此无论遗漏在配置文件、还是有人从 WRT_PACKAGE 手工追加，都会被拦下。
+          NEW_PLUGIN=$(grep -c '^CONFIG_PACKAGE_luci-app-mt5700=y$' .config || true)
+          OLD_PLUGIN=$(grep -c '^CONFIG_PACKAGE_luci-app-mt5700m=y$' .config || true)
+          if [ "$NEW_PLUGIN" -gt 0 ] && [ "$OLD_PLUGIN" -gt 0 ]; then
+            echo "::error::同一配置同时启用了 luci-app-mt5700 与 luci-app-mt5700m；两者都独占模组 AT 串口，只能二选一"
+            exit 1
+          fi
+          case "$WRT_MODEM" in
+            MT5700)  EXPECT_NEW=1; EXPECT_OLD=0 ;;
+            MT5700M) EXPECT_NEW=0; EXPECT_OLD=1 ;;
+            *)
+              echo "::error::WRT_MODEM=$WRT_MODEM 非法，只支持 MT5700 / MT5700M"
+              exit 1
+              ;;
+          esac
+          if [ "$NEW_PLUGIN" -ne "$EXPECT_NEW" ] || [ "$OLD_PLUGIN" -ne "$EXPECT_OLD" ]; then
+            echo "::error::WRT_MODEM=$WRT_MODEM 期望 ${EXPECT_NEW} 个新插件 / ${EXPECT_OLD} 个旧插件，实际新插件 $NEW_PLUGIN / 旧插件 $OLD_PLUGIN"
+            exit 1
+          fi
+          if [ "$EXPECT_NEW" -eq 1 ]; then
+            MODEM_I18N=luci-i18n-mt5700-zh-cn
+            MODEM_VER="$MT5700_VERSION"
+          else
+            MODEM_I18N=luci-i18n-mt5700m-zh-cn
+            MODEM_VER="$MT5700M_VERSION"
+          fi
+          if ! grep -q "^CONFIG_PACKAGE_${MODEM_I18N}=y$" .config; then
+            echo "::error::WRT_MODEM=$WRT_MODEM 缺少配套语言包 $MODEM_I18N（主包与语言包必须同批启用）"
+            exit 1
+          fi
+          echo "模组插件已启用：$WRT_MODEM（$MODEM_VER）"
+          echo "MT5700_PLUGIN_VERSION=${MODEM_VER}（$WRT_MODEM）" >> "$GITHUB_ENV"
+
+          make clean -j$(nproc)
 
       - name: Cross Compile Rust Backend
         # luci-app-mt5700 的后端是 Rust/Tokio 常驻程序。buildroot 编译阶段的 PATH
@@ -356,7 +486,7 @@ jobs:
         # 链接器用 zig（与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target
         # 不自带 libc 与启动对象，且 ring（rustls 的 TLS 实现）含 C 代码需要 C 编译器，
         # zig cc 一次提供两者，免装目标板交叉工具链。
-        if: env.WRT_TEST != 'true'
+        if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/
 
@@ -536,4 +666,4 @@ jobs:
             内核版本：${{env.WRT_KVER}}
             插件列表：${{env.WRT_LIST}}
 
-            MT5700M 插件版本：${{env.MT5700_VERSION}}
+            MT5700M 插件版本：${{env.MT5700_PLUGIN_VERSION}}
