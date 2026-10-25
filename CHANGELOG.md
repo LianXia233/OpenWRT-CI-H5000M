@@ -36,7 +36,7 @@
 - 矩阵展开核对：`MTK-AUTO` / `WRT-BUILD` 均为 `MT5700` + `MT5700M` 两个作业，
   分别对应 `Config/MT5700.txt` / `Config/MT5700M.txt`。
 
-## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（旧插件保留为可选项，二选一编译）
+## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（旧插件保留，两者互斥不可共存）
 
 ### 背景
 
@@ -54,7 +54,7 @@ Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
    `export PATH:=$(TARGET_PATH)`，PATH 里没有 `~/.cargo/bin`；改用
    `feeds/packages/lang/rust` 的 host rust 需现场编译 LLVM（1~2 小时、约 20GB 磁盘）。
 2. **两套插件争抢 AT 串口**：旧插件由 `mt5700m-transport` 持有串口，新插件由
-   Rust 后端持有，同时启用必然随机超时，必须在配置层强制二选一。
+   Rust 后端持有，同时启用必然随机超时，必须在配置层强制互斥。
 3. **风扇温控失去模组温度**：`luci-app-h5000m-fancontrol` 读
    `/var/run/mt5700m/temperature`（`updated=` 秒级时间戳 + `temperature=`，60 秒老化），
    该文件由旧插件的 `mt5700m-manager` 维护；新插件把温度留在自己的后端缓存里。
@@ -114,18 +114,18 @@ Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
     重复 msgid（`msgfmt --check` 判 fatal），而 luci.mk 实际用 po2lmo 编译 lmo，
     故从 feed 的 `luci-base/src` 现场构建 po2lmo，口径与打包一致。
   - Release Notes 版本行改取 `MT5700_PLUGIN_VERSION`（按 `WRT_MODEM` 取对应版本串）。
-- `.github/workflows/WRT-BUILD.yml` / `MTK-AUTO.yml`：新增 `MODEM` 下拉选择
-  （默认 `MT5700`）并透传为 `WRT_MODEM`。
-- `README.md` / `index.html`：新增「模组插件二选一」说明（两套配置、选择方式、
-  互斥规则），插件章节更新为 `luci-app-mt5700`（12 页面矩阵、服务与配置路径、
-  温度桥接、预编译后端构建方式），并补充旧插件作为备选的适用场景。
+- `.github/workflows/WRT-BUILD.yml` / `MTK-AUTO.yml`：透传 `WRT_MODEM`（当时为
+  下拉选择，随后改为固定矩阵 —— 一次触发并行产出两套固件，见上一条）。
+- `README.md` / `index.html`：新增模组插件说明（两套配置、互斥规则、两套固件各含一套），
+  插件章节更新为 `luci-app-mt5700`（12 页面矩阵、服务与配置路径、
+  温度桥接、预编译后端构建方式），并补充旧插件作为另一套固件的模组管理方案。
 
 ### 不兼容说明
 
 `luci-app-mt5700`、`luci-app-mt5700m`、QModem 都独占 MT5700M 的 AT 串口，
-三者两两不能共存。本仓库通过「一次构建只启用一套」保证产物里只有一套插件：
+三者两两不能共存。本仓库每次构建并行产出两套固件、每套只启用一套插件：
 两套配置（`Config/MT5700.txt` / `Config/MT5700M.txt`）都保留，但同一份 `.config`
-不允许同时启用，CI 会强制拦截。选购固件或自行编译时请只选其一；装好固件后
+不允许同时启用，CI 会强制拦截。下载时按需选其中一套；装好固件后
 也不要再从软件源手工加装另一套。
 
 ### 验证

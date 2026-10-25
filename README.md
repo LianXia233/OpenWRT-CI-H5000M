@@ -35,7 +35,7 @@
 1. 进入仓库的 **Actions** 标签页。
 2. 在左侧工作流列表中选择 **WRT-BUILD**。
 3. 点击右侧 **Run workflow** 浮窗，按需填写参数（如测试模式、扩展插件列表）。
-4. 编译完成后，固件制品将自动上传至仓库的 **Releases** 页面。
+4. 编译完成后，**两套固件**（`MT5700` / `MT5700M`）将分别发布到仓库的 **Releases** 页面。
 
 > [!TIP]
 > 仓库根目录内置的 [`index.html`](./index.html) 为固件发布展示落地页，可直接启用 **GitHub Pages** 托管，亦可在本地浏览器打开直观浏览设备适配特性与下载链接。
@@ -49,18 +49,18 @@ OpenWRT-CI-H5000M/
 ├── .github/workflows/
 │   ├── WRT-CORE.yml          # 云编译底层执行引擎（被 WRT-BUILD / MTK-AUTO 复用）
 │   ├── WRT-BUILD.yml         # 手动触发定制编译入口
-│   ├── MTK-AUTO.yml          # 每日定时自动构建并发布 Release
+│   ├── MTK-AUTO.yml          # 每日定时自动构建：固定产出 MT5700 / MT5700M 两套固件
 │   ├── Auto-Clean.yml        # 历史 Release 与构建日志自动轮换清理
 │   └── Cache-Clean.yml       # Actions 依赖缓存定时清理
 ├── Config/
 │   ├── GENERAL.txt           # 全局内核模块、网络协议栈与 H5000M 专属插件清单
 │   ├── MEDIATEK-WIFI-YES.txt # 针对 Hiveton H5000M 设备的 Target 与 Wi-Fi 驱动配置
-│   ├── MT5700.txt            # 模组插件选项一：luci-app-mt5700（默认）
-│   └── MT5700M.txt           # 模组插件选项二：luci-app-mt5700m（与选项一互斥）
+│   ├── MT5700.txt            # 固件 A 的插件清单：luci-app-mt5700（新插件）
+│   └── MT5700M.txt           # 固件 B 的插件清单：luci-app-mt5700m（旧插件，两者不共存于同一固件）
 ├── Scripts/
-│   ├── Packages.sh          # 第三方扩展插件源同步与版本拉取
-│   ├── Handles.sh           # HomeProxy 等网络组件预置与冲突修复
-│   └── Settings.sh          # 系统默认 IP、Wi-Fi SSID/密码、主机名等底层初始化
+│   ├── Packages.sh           # 第三方扩展插件源同步与版本拉取
+│   ├── Handles.sh            # HomeProxy 等网络组件预置与冲突修复
+│   └── Settings.sh           # 系统默认 IP、Wi-Fi SSID/密码、主机名等底层初始化
 ├── index.html                # 固件发布落地页（支持 GitHub Pages）
 ├── LICENSE                   # 开源许可协议
 └── README.md                 # 固件说明文档
@@ -136,7 +136,7 @@ OpenWRT-CI-H5000M/
 
 需要旧插件的能力（原生 C 传输程序 `mt5700m-transport`、`/etc/mt5700m/traffic-history` 流量历史、链路健康自愈）时，直接下载同批次发布的 `MT5700M` 固件（对应 `Config/MT5700M.txt`）：
 
-* 入口同样是「网络 → MT5700M 5G 模组」，运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件。
+* 入口同样是「网络 → 移动网络 → MT5700M 模组」（`admin/modem/mt5700m`），运行期由 `mt5700m-transport` 独占 AT 串口，并自行维护模组温度缓存 `/var/run/mt5700m/temperature`，风扇温控插件直接复用该文件。
 * 该固件下不会编译 `luci-app-mt5700`，温度桥接脚本也不会进入固件（它只随新插件打包）；语言包为 `luci-i18n-mt5700m-zh-cn`。
 * 旧插件额外依赖 `flock`（该依赖只在 `Config/MT5700M.txt` 中启用）。
 
@@ -152,17 +152,17 @@ OpenWRT-CI-H5000M/
 
 为 5G 蜂窝与传统 WAN 口有线光纤双接入场景提供一键化管理：
 
-* 🔄 **模式快速指派**：支持“仅 5G 蜂窝”、“仅有线 WAN”以及“多线并发 / 故障自动转移”三大核心场景快速切换。
-* ⚡ **高可用容灾**：与 `mwan3` 状态机联动，毫秒级探测链路健康度，主链路中断时自动倒换备用链路，保障关键业务零断连。
+* 🔄 **四种模式一键指派**：`有线优先`（`wan_first`）、`5G 优先`（`modem_first`）、`仅有线`（`wan_only`）、`仅 5G`（`modem_only`）。
+* ⚡ **路由优先级倒换**：通过 uci 调整 `wan` / `MT5700M` 的 `metric` 与默认路由标记，切换后 `network reload` 生效；主链路默认路由消失时由内核路由自动改走备用链路（**不依赖 mwan3**）。
 
 ---
 
 ## 🛠️ 三、 系统级扩展与服务支持
 
-* **加密加速引擎**：默认集成 `kmod-cryptodev` 与 `kmod-tls`，使 HomeProxy、OpenClash 等科学分流工具在千兆满速下 CPU 占用降低 40% 以上。
+* **加密加速引擎**：默认集成 `kmod-cryptodev` 与 `kmod-tls`，使 HomeProxy 等科学分流工具在千兆满速下显著降低 CPU 占用。
 * **USB 驱动协议栈**：打包 `kmod-usb-core`、`kmod-usb3`、`kmod-usb-net-qmi-wwan` 及 `kmod-usb-serial`，保障外部拓展模组即插即用。
 * **轻量 NAS 与存储扩展**：原生支持 NVMe 固态硬盘（`kmod-nvme`）挂载，结合 BTRFS 文件系统与 Samba4，打造稳定私有云。
-* **安全异地组网**：内置 EasyTier、Tailscale、ZeroTier 等主流虚拟局域网方案，随时随地安全直连家中设备。
+* **安全异地组网**：内置 EasyTier（含 LuCI 配置界面）与 `kmod-wireguard` 内核模块；Tailscale / ZeroTier 等未预置，需要时自行安装。
 
 ---
 
@@ -172,8 +172,8 @@ OpenWRT-CI-H5000M/
 
 * 🐧 **[ImmortalWrt](https://github.com/immortalwrt/immortalwrt/?utm_source=gemini)**：提供功能丰富、性能卓越的主线底层路由源码。
 * 👤 **[VIKINGYFY](https://github.com/VIKINGYFY?utm_source=gemini)**：为本项目提供经过长期实机验证的云端构建脚手架、底包配置与插件优化模板。
-* 👤 **[LianXia233](https://github.com/LianXia233?utm_source=gemini)**：提供 [luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700?utm_source=gemini) —— 本固件当前使用的 MT5700M 模组管理插件（LuCI 前端 + Rust/Tokio 后端单包融合）。
-* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了硬件配套的 [luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini) 与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 插件（其 luci-app-mt5700m 已由 luci-app-mt5700 取代）。
+* 👤 **[LianXia233](https://github.com/LianXia233?utm_source=gemini)**：提供 [luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700?utm_source=gemini) —— 编入 `MT5700` 固件的 MT5700M 模组管理插件（LuCI 前端 + Rust/Tokio 后端单包融合）。
+* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了硬件配套的 [luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini) 与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 插件，其 [luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m?utm_source=gemini) 编入 `MT5700M` 固件。
 
 ---
 
