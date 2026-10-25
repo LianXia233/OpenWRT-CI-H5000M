@@ -7,7 +7,7 @@
 [![ImmortalWrt](https://img.shields.io/badge/ImmortalWrt-VIKINGYFY%2Fowrt-00A0D0.svg?logo=openwrt&logoColor=white&style=flat-square)](https://github.com/VIKINGYFY/immortalwrt)
 [![Platform](https://img.shields.io/badge/Platform-MediaTek%20Filogic-FF6B35.svg?style=flat-square)](#-一-硬件平台与固件底层概述)
 [![Device](https://img.shields.io/badge/Device-Hiveton%20H5000M-blue.svg?style=flat-square)](#-目标设备与编译配置)
-[![Modem](https://img.shields.io/badge/Modem-MT5700M%205G-success.svg?style=flat-square)](#1-mt5700m-5g-模组支持-luci-app-mt5700m)
+[![Modem](https://img.shields.io/badge/Modem-MT5700M%205G-success.svg?style=flat-square)](#1-mt5700m-5g-模组管理luci-app-mt5700)
 [![Workflow](https://github.com/LianXia233/OpenWRT-CI-H5000M/actions/workflows/WRT-BUILD.yml/badge.svg?style=flat-square)](https://github.com/LianXia233/OpenWRT-CI-H5000M/actions)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
 
@@ -92,21 +92,28 @@ OpenWRT-CI-H5000M/
 
 ## 🧩 二、 核心专属 5G CPE 插件
 
-固件深度集成了由 **FAN789** 开发的硬件级适配套件，彻底补全 5G CPE 在路由器系统下的交互短板：
+固件深度集成两套硬件级适配套件：模组管理由 **LianXia233/luci-app-mt5700** 提供（单包内含 LuCI 前端与 Rust/Tokio 常驻后端），风扇温控与网络模式切换沿用 **FAN789** 的 H5000M 套件。
 
-### 1. MT5700M 5G 模组支持 (`luci-app-mt5700m`)
+### 1. MT5700M 5G 模组管理（`luci-app-mt5700`）
 
-作为 CPE 的网络命脉，该插件（当前跟随上游 **v3.0.3**）为 MT5700M 模组提供了完整的协议栈驱动与 LuCI 可视化控制台：
+作为 CPE 的网络命脉，该插件（当前跟随上游 **v1.30.4**，后端 `at-webserver` 1.29.0）以自有 Rust 后端独占模组 AT 串口，提供 12 个功能页面，统一入口为 **网络 → 移动网络 → 5G 模组管理**：
 
-* 📊 **实时网络拓扑**：动态展示当前蜂窝网络类型（SA / NSA）、信号强度（RSRP / RSRQ / SINR）、载波聚合、服务小区频段（Band）、运营商信息及模组 / SIM 状态。
-* 🔌 **多协议支持**：支持 QMI、NCM、ECM 等多种通信协议无缝切换，提供极低延迟的数据通道。
-* ⚙️ **内置 AT 终端**：由插件自有的原生 C 程序 `mt5700m-transport`（串口 / TCP AT 传输）驱动，Web 界面直接向模组下发 AT 指令，轻松实现频段锁定（Lock Band）、小区锁定及基带固件调试。
-* ✉️ **短信中枢服务**：`mt5700m-transport` 内置短信收发（UTF-16 编码，支持中文与 emoji、多段短信），后台发送任务带进度与明确结果，确认不明时不自动重发，避免重复计费。
-* 📈 **流量历史与温度缓存**：流量历史持久化于 `/etc/mt5700m/traffic-history`，模组温度缓存发布，供状态页与风扇温控联动。
-* 🩺 **链路健康自愈**：区分「数据链路已连接」与「互联网验证通过」，检测蜂窝租约不一致与联网失败，按条件恢复数据会话（带冷却与每小时次数上限）；APN / 拨号变更先备份后核对，失败自动回滚。
+| 分组 | 页面 | 核心能力 |
+| --- | --- | --- |
+| 状态与链路 | 网络状态 | 网络制式（SA / NSA）、RSRP / RSRQ / SINR、载波聚合、服务小区与频段、运营商 / SIM 状态；实时速率取自内核网卡计数，**不占用 AT 通道** |
+| 接入配置 | 网络设置 · 拨号设置 | APN / PDP / 鉴权、自动拨号与断线重连；`iface_v4` / `iface_v6` 支持自动复用已有接口或创建 `MT5700M` 接口并登记防火墙区域 |
+| 无线调优 | 全网扫频 · 定时锁频 | 频段与小区扫描、按计划的锁频 / 锁小区任务 |
+| 模组维护 | 模组设置 · 模组升级 | 模组参数与工作模式、USB 组合、FOTA 升级 |
+| 短信 | 短信中心 · 短信设置 | UTF-16 中文与 emoji、多段长短信、会话与去重、发送任务进度，确认不明时不自动重发 |
+| 调试与运维 | AT 调试终端 · 运行日志 · 服务配置 | 手工下发 AT 指令、后端日志检索、串口与后端参数配置 |
 
-> [!NOTE]
-> 自 v3.0.x 起插件运行时不再依赖 `ubus-at-daemon` / `sms-tool` / QModem 服务（本固件已于 2026-10-10 移除前两者，本次适配同步移除 QModem clone）。整个模组操作串行化，请勿再安装其他抢占同一 AT 串口的模组管理服务。
+* 🩺 **事件通知与自愈**：信号定时巡检、事件推送（Webhook / 邮件 / QQ 机器人等），并区分「数据链路已连接」与「互联网验证通过」，按条件恢复数据会话。
+* ❄️ **温度联动（本仓库注入）**：随包附带 `mt5700-temp-bridge`，每 30 秒经 `ubus call mt5700 at` 取一次 `AT^CHIPTEMP?` 的 12 路芯片温度，按旧格式（`updated=` + `temperature=`）原子写入 `/var/run/mt5700m/temperature`，**风扇温控插件无需改动**即可继续拿到模组温度。
+* 🧱 **服务与配置**：服务 `/etc/init.d/at-webserver`（procd，含接口拉起与开机自愈）、配置 `/etc/config/at-webserver`、后端 `/usr/bin/at-webserver-rust`；rpcd ucode 插件经 `nc 127.0.0.1 <port>` 访问后端（`nc` / `timeout` 由 busybox 默认提供）。
+* 🛠️ **构建方式（本仓库深度适配）**：后端为静态 musl 二进制，CI 在编译固件前用 rustup + zig 交叉编译出 aarch64 产物并交给包内预编译分支安装——buildroot 编译阶段没有 cargo，也不需要在 CI 里现编 host rust（详见更新日志）。
+
+> [!IMPORTANT]
+> **与 `FAN789/luci-app-mt5700m`、QModem 不兼容。** 三者都独占同一 AT 串口，同时安装会互相抢口，表现为 AT 指令超时、拨号状态来回跳、模组「无响应」。本固件自 2026-10-25 起只保留 `luci-app-mt5700`：旧插件已从构建中移除（`Scripts/Packages.sh` 会强制删除并断言其不存在），QModem 的 clone 行亦保持注释状态。请勿再从软件源手工安装其他占用同一串口的模组管理服务。
 
 ### 2. 硬件级智能风扇温控 (`luci-app-h5000m-fancontrol`)
 
@@ -140,7 +147,8 @@ OpenWRT-CI-H5000M/
 
 * 🐧 **[ImmortalWrt](https://github.com/immortalwrt/immortalwrt/?utm_source=gemini)**：提供功能丰富、性能卓越的主线底层路由源码。
 * 👤 **[VIKINGYFY](https://github.com/VIKINGYFY?utm_source=gemini)**：为本项目提供经过长期实机验证的云端构建脚手架、底包配置与插件优化模板。
-* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了关键的 [luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m?utm_source=gemini)、[luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini) 与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 驱动插件。
+* 👤 **[LianXia233](https://github.com/LianXia233?utm_source=gemini)**：提供 [luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700?utm_source=gemini) —— 本固件当前使用的 MT5700M 模组管理插件（LuCI 前端 + Rust/Tokio 后端单包融合）。
+* 👤 **[FAN789](https://github.com/FAN789?utm_source=gemini)**：为 Hiveton H5000M 研发了硬件配套的 [luci-app-h5000m-fancontrol](https://github.com/FAN789/luci-app-h5000m-fancontrol?utm_source=gemini) 与 [luci-app-h5000m-netmode](https://github.com/FAN789/luci-app-h5000m-netmode?utm_source=gemini) 插件（其 luci-app-mt5700m 已由 luci-app-mt5700 取代）。
 
 ---
 

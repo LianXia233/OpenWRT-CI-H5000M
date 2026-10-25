@@ -70,16 +70,13 @@ UPDATE_PACKAGE "netwizard" "sirpdboy/luci-app-netwizard" "main"
 UPDATE_PACKAGE "openlist2" "sbwml/luci-app-openlist2" "main"
 UPDATE_PACKAGE "partexp" "sirpdboy/luci-app-partexp" "main"
 UPDATE_PACKAGE "qbittorrent" "sbwml/luci-app-qbittorrent" "master" "" "qt6base qt6tools rblibtorrent"
-UPDATE_PACKAGE "qmodem" "FUjr/QModem" "main"
 UPDATE_PACKAGE "quickfile" "sbwml/luci-app-quickfile" "main"
 UPDATE_PACKAGE "timecontrol" "sirpdboy/luci-app-timecontrol" "main"
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-box luci-app-homeproxy luci-app-timewol luci-app-wolplus luci-app-wolultra"
 
 # 2026-10-23 移除 qmodem（FUjr/QModem）clone：
-# luci-app-mt5700m 自 3.0.0 起以自有 C 程序 mt5700m-transport 完整覆盖模组管理
-# （AT 串口/TCP、短信、流量、健康检查），运行时不再依赖 QModem 服务；
-# 且 QModem 与 luci-app-mt5700m 会争抢同一 AT 串口，并存存在误操作风险。
-# 本固件 GENERAL.txt 从未启用 luci-app-qmodem，移除 clone 不影响产物，
+# QModem 与 MT5700M 模组插件会争抢同一 AT 串口，并存存在误操作风险；
+# 本固件 GENERAL.txt 亦从未启用 luci-app-qmodem，移除 clone 不影响产物，
 # 仅减少每次构建的 clone 耗时与 package 树体积。如需恢复，取消下一行注释：
 #UPDATE_PACKAGE "qmodem" "FUjr/QModem" "main"
 
@@ -107,28 +104,244 @@ FIX_SINGBOX_STALE_PATCH
 
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 
-# FAN789 插件
+# H5000M 硬件配套插件（FAN789）
 UPDATE_PACKAGE "luci-app-h5000m-fancontrol" "FAN789/luci-app-h5000m-fancontrol" "main"
-UPDATE_PACKAGE "luci-app-mt5700m" "FAN789/luci-app-mt5700m" "main"
 UPDATE_PACKAGE "luci-app-h5000m-netmode" "FAN789/luci-app-h5000m-netmode" "main"
 
-# ===== luci-app-mt5700m 克隆结果校验与版本记录（2026-10-23）=====
-# 该仓库顶层无 Makefile，由 luci-app-mt5700m/ 与 mt5700m-transport/ 两个子目录
-# 提供包定义（immortalwrt 的 include/scan.mk 以 SCAN_DEPTH=5 扫描 package/ 树，
-# 二级子目录可被正常识别，无需平铺）。这里在上游仓库结构调整时尽早失败，
-# 并把版本号写入 GITHUB_ENV 供 Release Notes 引用。
-MT5700M_APP_DIR="./luci-app-mt5700m/luci-app-mt5700m"
-MT5700M_TP_DIR="./luci-app-mt5700m/mt5700m-transport"
-if [ -f "$MT5700M_APP_DIR/Makefile" ] && [ -f "$MT5700M_TP_DIR/Makefile" ]; then
-	MT5700M_APP_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700M_APP_DIR/Makefile" | head -1)
-	MT5700M_TP_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700M_TP_DIR/Makefile" | head -1)
-	MT5700M_INFO="app ${MT5700M_APP_VER} / transport ${MT5700M_TP_VER}"
-	echo "luci-app-mt5700m version: $MT5700M_INFO"
-	[ -n "${GITHUB_ENV:-}" ] && echo "MT5700M_VERSION=$MT5700M_INFO" >> "$GITHUB_ENV"
-else
-	echo "ERROR: FAN789/luci-app-mt5700m 仓库结构异常：未找到 $MT5700M_APP_DIR/Makefile 或 $MT5700M_TP_DIR/Makefile" >&2
+# MT5700M 模组主插件（LianXia233/luci-app-mt5700）
+# 该仓库顶层即包定义（Makefile + htdocs + po + root + src），单包内含 LuCI 前端
+# 与 Rust/Tokio 后端（at-webserver-rust），clone 后目录名正好是包名，无需二次整理。
+UPDATE_PACKAGE "luci-app-mt5700" "LianXia233/luci-app-mt5700" "main"
+
+# ===== 与旧插件 FAN789/luci-app-mt5700m 互斥（2026-10-25）=====
+# 两者都通过独占 MT5700M AT 串口工作（新插件由 Rust 后端持有串口，旧插件由
+# mt5700m-transport 持有），同时安装必然互相抢口、随机出现「命令超时 / 模组无响应」。
+# 因此本固件固定只保留 luci-app-mt5700：先删掉可能残留在 package 树的旧包目录，
+# 再确认它确实不存在（防止后续有人恢复 clone 行时静默并存）。
+rm -rf ./luci-app-mt5700m
+if [ -d ./luci-app-mt5700m ]; then
+	echo "ERROR: 旧插件 luci-app-mt5700m 无法移除，它与 luci-app-mt5700 互斥" >&2
 	exit 1
 fi
+
+# ===== luci-app-mt5700 克隆结果校验与版本记录（2026-10-25）=====
+# 上游仓库结构调整、文件改名或漏推时在此尽早失败，避免数小时后才在编译阶段暴露。
+# 同时把版本号写入 GITHUB_ENV，供 Release Notes 引用。
+MT5700_DIR="./luci-app-mt5700"
+MT5700_REQUIRED="Makefile
+src/Makefile
+src/rust/Cargo.toml
+src/rust/Cargo.lock
+root/etc/init.d/at-webserver
+root/etc/config/at-webserver
+root/usr/share/rpcd/ucode/mt5700.uc
+root/usr/share/luci/menu.d/luci-app-mt5700.json
+root/usr/share/rpcd/acl.d/luci-app-mt5700.json
+htdocs/luci-static/resources/view/at-webserver/network_status.js
+po/zh_Hans/luci-app-mt5700.po"
+MT5700_MISSING=""
+while read -r MT5700_FILE; do
+	[ -z "$MT5700_FILE" ] && continue
+	[ -f "$MT5700_DIR/$MT5700_FILE" ] || MT5700_MISSING="$MT5700_MISSING $MT5700_FILE"
+done <<< "$MT5700_REQUIRED"
+if [ -n "$MT5700_MISSING" ]; then
+	echo "ERROR: LianXia233/luci-app-mt5700 仓库结构异常，缺少:$MT5700_MISSING" >&2
+	exit 1
+fi
+MT5700_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700_DIR/Makefile" | head -1)
+MT5700_BACKEND_VER=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$MT5700_DIR/src/rust/Cargo.toml" | head -1)
+MT5700_INFO="plugin ${MT5700_VER} / backend ${MT5700_BACKEND_VER}"
+echo "luci-app-mt5700 version: $MT5700_INFO"
+[ -n "${GITHUB_ENV:-}" ] && echo "MT5700_VERSION=$MT5700_INFO" >> "$GITHUB_ENV"
+
+# ===== 深度适配：让包在 buildroot 内使用 CI 预编译的 Rust 后端 =====
+# 固件构建阶段的 PATH 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），
+# 既没有宿主 cargo/rustc，也不适合在 CI 里临时拉起 feeds/packages/lang/rust
+# （host rust 要现场编译 LLVM，动辄 1~2 小时且占 20GB 磁盘）。
+# 因此 WRT-CORE.yml 在编译前用 rustup + zig 交叉编译出 aarch64 musl 静态二进制，
+# 放到 src/prebuilt/at-webserver；这里把上游 src/Makefile 的 compile 目标改成
+# 「有预编译产物就直接装，否则回退上游 cargo 构建」，install 目标无需改动。
+# 上游若调整 compile 规则，下面的结构校验会立刻失败，而不是静默编出旧逻辑。
+PREPARE_MT5700_PREBUILT() {
+	local MAKE_FILE="$MT5700_DIR/src/Makefile"
+
+	python3 - "$MAKE_FILE" <<'PY'
+import io
+import re
+import sys
+
+path = sys.argv[1]
+src = io.open(path, encoding='utf-8').read()
+
+if 'MT5700_PREBUILT_HOOK' in src:
+    print('luci-app-mt5700: 预编译注入已存在，跳过')
+    sys.exit(0)
+
+if re.search(r'^install:', src, re.M) is None:
+    sys.exit('ERROR: src/Makefile 缺少 install 目标，上游结构已变更，需人工复核预编译注入')
+
+new_compile = '''# ==== MT5700_PREBUILT_HOOK（本仓库深度适配，勿手改）====
+# 固件构建阶段 PATH 内没有 cargo；CI 已用 rustup + zig 交叉编译出静态后端，
+# 放在 src/prebuilt/at-webserver。存在时直接复制到 $(BIN)，否则回退上游 cargo 构建。
+compile:
+	@if [ -x "$(CURDIR)/prebuilt/at-webserver" ]; then \\
+		echo "==> [mt5700] 使用预编译后端: $(CURDIR)/prebuilt/at-webserver"; \\
+		mkdir -p "$(dir $(BIN))"; \\
+		cp -f "$(CURDIR)/prebuilt/at-webserver" "$(BIN)"; \\
+	else \\
+		echo "==> [mt5700] cargo build: ARCH=$(ARCH) ARCH_PACKAGES=$(ARCH_PACKAGES) RUST_TARGET=$(RUST_TARGET)"; \\
+		cd $(RUST_DIR) && \\
+			CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" \\
+			cargo build $(CARGO_BUILD_STD_FLAGS) --release --target $(RUST_TARGET); \\
+	fi
+	test -x "$(BIN)" || { echo "ERROR: 未产出后端二进制 $(BIN)"; exit 1; }
+	@echo "==> [mt5700] 后端二进制就绪: $(BIN)"
+
+'''
+
+patched, n = re.subn(r'(?ms)^compile:.*?(?=^install:)', new_compile, src)
+if n != 1:
+    sys.exit('ERROR: src/Makefile 的 compile 目标匹配数量为 %d（期望 1），上游结构已变更' % n)
+
+io.open(path, 'w', encoding='utf-8', newline='\n').write(patched)
+print('luci-app-mt5700: 已注入预编译后端分支')
+PY
+}
+
+# ===== 深度适配：模组温度桥接到 FAN789 风扇插件 =====
+# 旧插件 luci-app-mt5700m 会把 AT^CHIPTEMP? 的峰值温度写入
+# /var/run/mt5700m/temperature（updated= 秒级时间戳 + temperature= 摄氏度），
+# luci-app-h5000m-fancontrol 以该文件为「模组温度」输入（60 秒老化）。
+# 新插件把温度留在自己的后端缓存里、不落这个文件，风扇因此拿不到模组温度。
+# 这里随包附带一个桥接守护：每 30s 经 ubus（mt5700.at）取一次芯片温度，
+# 按旧格式落盘，风扇插件无需改动即可继续工作。
+INJECT_MT5700_TEMP_BRIDGE() {
+	local ROOT_DIR="$MT5700_DIR/root"
+
+	mkdir -p "$ROOT_DIR/usr/sbin" "$ROOT_DIR/etc/init.d" "$ROOT_DIR/etc/uci-defaults" || {
+		echo "ERROR: 无法创建温度桥接目录" >&2
+		exit 1
+	}
+
+	cat > "$ROOT_DIR/usr/sbin/mt5700-temp-bridge" <<'EOF'
+#!/bin/sh
+# MT5700M 模组温度桥接（Hiveton H5000M 定制固件配套脚本，随 luci-app-mt5700 发布）
+#
+# 为什么需要它：
+#   本固件自 2026-10-25 起用 luci-app-mt5700 取代 luci-app-mt5700m。新插件
+#   把 AT^CHIPTEMP? 的温度放在自己的后端缓存里，不再写 FAN789 风扇插件读取的
+#   /var/run/mt5700m/temperature；而风扇插件（luci-app-h5000m-fancontrol）
+#   仍以该文件作为「模组温度」输入（updated= 秒级时间戳，60 秒内有效）。
+#   本脚本按固定间隔经 ubus 向新插件取一次芯片温度，按旧格式落盘，风扇曲线
+#   因此继续拿到模组温度，无需改动风扇插件。
+#
+# 数据流：ubus call mt5700 at '{"cmd":"AT^CHIPTEMP?"}' → 12 路传感器（0.1℃）
+#   → 取最高值（与旧插件 print_temperature 口径一致）→ temperature=<℃>
+#
+# 可调环境变量（一般无需设置）：
+#   MT5700_TEMP_BRIDGE_INTERVAL  轮询间隔秒（默认 30，必须小于风扇插件 60s 老化窗口）
+#   MT5700_TEMP_STATE_DIR        缓存目录（默认 /var/run/mt5700m）
+
+STATE_DIR="${MT5700_TEMP_STATE_DIR:-/var/run/mt5700m}"
+CACHE="${STATE_DIR}/temperature"
+INTERVAL="${MT5700_TEMP_BRIDGE_INTERVAL:-30}"
+
+command -v jsonfilter >/dev/null 2>&1 || exit 1
+command -v ubus >/dev/null 2>&1 || exit 1
+
+parse_chip_temp() {
+	tr -d '\r' | awk -F, '
+		BEGIN {
+			name[1]="sub3g_pa"; name[2]="sub6g_pa"; name[3]="mimo_pa"; name[4]="tcxo"
+			name[5]="peri1"; name[6]="peri2"; name[7]="ap1"; name[8]="ap2"
+			name[9]="modem1"; name[10]="modem2"; name[11]="bbp1"; name[12]="bbp2"
+		}
+		/^\^CHIPTEMP:/ {
+			sub(/^\^CHIPTEMP:[[:space:]]*/, "", $1)
+			for (i = 1; i <= 12 && i <= NF; i++) {
+				value = $i
+				gsub(/[[:space:]]/, "", value)
+				if (value !~ /^-?[0-9]+$/) continue
+				numeric = value + 0
+				if (numeric < -400 || numeric > 1200) continue
+				printf "temp_%s=%.1f\n", name[i], numeric / 10
+				if (!found || numeric > peak) { peak = numeric; peak_name = name[i]; found = 1 }
+			}
+			if (found) {
+				printf "temperature=%.1f\n", peak / 10
+				printf "temperature_sensor=%s\n", peak_name
+			}
+			exit
+		}'
+}
+
+while :; do
+	raw="$(ubus call mt5700 at '{"cmd":"AT^CHIPTEMP?","_rid":"tempbridge"}' 2>/dev/null)"
+	body="$(printf '%s' "$raw" | jsonfilter -e '@.data' 2>/dev/null)"
+	if [ -n "$body" ]; then
+		out="$(printf '%s\n' "$body" | parse_chip_temp)"
+		value="$(printf '%s\n' "$out" | sed -n 's/^temperature=//p' | head -n 1)"
+		case "$value" in
+			''|*[!0-9.-]*) ;;
+			*)
+				if awk -v v="$value" 'BEGIN { exit !(v >= -40 && v <= 150) }'; then
+					mkdir -p "$STATE_DIR" 2>/dev/null
+					tmp="${CACHE}.$$"
+					if {
+						printf '%s\n' "$out" | grep -E '^(temp_[a-z0-9_]+|temperature)=-?[0-9]+([.][0-9]+)?$|^temperature_sensor=[a-z0-9_]+$'
+						printf 'updated=%s\n' "$(date +%s)"
+					} > "$tmp" 2>/dev/null; then
+						mv -f "$tmp" "$CACHE" 2>/dev/null && chmod 0644 "$CACHE" 2>/dev/null
+					else
+						rm -f "$tmp" 2>/dev/null
+					fi
+					rm -f "$tmp" 2>/dev/null
+				fi
+				;;
+		esac
+	fi
+	sleep "$INTERVAL"
+done
+EOF
+
+	cat > "$ROOT_DIR/etc/init.d/mt5700-temp-bridge" <<'EOF'
+#!/bin/sh /etc/rc.common
+# MT5700M 模组温度桥接服务（随 luci-app-mt5700 一起发布）
+# 作用：把新插件的芯片温度按旧格式写入 /var/run/mt5700m/temperature，
+#       供 luci-app-h5000m-fancontrol 的风扇曲线使用。详见 mt5700-temp-bridge 头部注释。
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+	[ -x /usr/sbin/mt5700-temp-bridge ] || return 0
+	procd_open_instance
+	procd_set_param command /usr/sbin/mt5700-temp-bridge
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 0
+	procd_set_param stderr 0
+	procd_close_instance
+}
+EOF
+
+	cat > "$ROOT_DIR/etc/uci-defaults/93-mt5700-temp-bridge" <<'EOF'
+#!/bin/sh
+# 首启自动注册温度桥接服务（procd 常驻，默认 30s 取一次模组温度）
+[ -x /etc/init.d/mt5700-temp-bridge ] && /etc/init.d/mt5700-temp-bridge enable
+exit 0
+EOF
+
+	chmod 0755 "$ROOT_DIR/usr/sbin/mt5700-temp-bridge" \
+		"$ROOT_DIR/etc/init.d/mt5700-temp-bridge" \
+		"$ROOT_DIR/etc/uci-defaults/93-mt5700-temp-bridge" || {
+		echo "ERROR: 温度桥接脚本设置执行位失败" >&2
+		exit 1
+	}
+	echo "luci-app-mt5700: 已注入模组温度桥接（/var/run/mt5700m/temperature）"
+}
+
+PREPARE_MT5700_PREBUILT
+INJECT_MT5700_TEMP_BRIDGE
 
 #更新软件包版本
 UPDATE_VERSION() {

@@ -369,7 +369,7 @@
                     </div>
                     <h3 class="text-lg font-black text-slate-900 mb-2">5G 蜂窝全网通</h3>
                     <p class="text-sm text-slate-600 leading-relaxed">
-                        深度适配鼎桥 MT5700M 模组，原生支持 5G SA/NSA 双模全网通。支持 QMI/NCM 高速通信协议，内置 AT 指令终端与短信收发中枢，附带流量历史与链路健康自愈。
+                        深度适配鼎桥 MT5700M 模组，原生支持 5G SA/NSA 双模全网通。Rust/Tokio 常驻后端独占 AT 串口，12 个可视化页面覆盖信号、拨号、扫频锁频、短信、模组升级与调试，并支持事件推送与链路自愈。
                     </p>
                 </div>
 
@@ -418,7 +418,7 @@
         <section id="exclusive-plugins" class="glass-card-white rounded-3xl p-6 sm:p-8 md:p-12 space-y-8">
             <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div>
-                    <span class="text-sky-600 text-xs sm:text-sm font-bold tracking-wider uppercase">FAN789 硬件套件深度适配</span>
+                    <span class="text-sky-600 text-xs sm:text-sm font-bold tracking-wider uppercase">LianXia233 × FAN789 硬件套件深度适配</span>
                     <h2 class="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1">专属 5G CPE 硬件插件套件</h2>
                     <p class="text-slate-600 text-sm mt-1">彻底补齐 5G CPE 在标准 OpenWRT 上的驱动与可视化交互短板</p>
                 </div>
@@ -428,43 +428,43 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- 插件 1: luci-app-mt5700m -->
+                <!-- 插件 1: luci-app-mt5700 -->
                 <div class="rounded-3xl p-6 bg-slate-50/90 border border-slate-200/80 hover:border-sky-400 hover:shadow-lg transition-all flex flex-col justify-between">
                     <div>
                         <div class="flex items-center justify-between mb-4">
-                            <span class="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-700 text-xs font-bold font-mono">luci-app-mt5700m</span>
+                            <span class="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-700 text-xs font-bold font-mono">luci-app-mt5700</span>
                             <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
-                                <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 中文控制台
+                                <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 12 页面 · 中文
                             </span>
                         </div>
                         <h3 class="text-xl font-bold text-slate-900 mb-2">MT5700M 5G 模组管理</h3>
-                        <p class="text-xs text-slate-500 mb-4 leading-relaxed">CPE 网络命脉核心驱动与 LuCI 可视化控制台</p>
-                        
+                        <p class="text-xs text-slate-500 mb-4 leading-relaxed">LuCI 前端 + Rust/Tokio 常驻后端单包融合</p>
+
                         <ul class="space-y-2.5 text-xs text-slate-700">
                             <li class="flex items-start gap-2">
                                 <span class="text-sky-500 font-bold">✓</span>
-                                <span><strong>实时拓扑大屏</strong>：动态显示 SA/NSA 状态、频段 Band、RSRP / RSRQ / SINR 信号指标、运营商与基站信息</span>
+                                <span><strong>实时状态大屏</strong>：SA/NSA 制式、频段 Band、RSRP / RSRQ / SINR、载波聚合、服务小区与运营商信息；速率取自内核网卡计数，不占用 AT 通道</span>
                             </li>
                             <li class="flex items-start gap-2">
                                 <span class="text-sky-500 font-bold">✓</span>
-                                <span><strong>多协议无缝切换</strong>：QMI、NCM、ECM 极速驱动切换，免去繁琐手动拨号</span>
+                                <span><strong>拨号与接口自动化</strong>：APN / PDP / 鉴权配置与自动拨号，自动复用或创建 <code class="font-mono">MT5700M</code> 接口并登记防火墙区域</span>
                             </li>
                             <li class="flex items-start gap-2">
                                 <span class="text-sky-500 font-bold">✓</span>
-                                <span><strong>内置 Web AT 控制台</strong>：自有原生传输程序驱动，Web 页面下发 AT 指令，一键锁频（Lock Band）、锁小区与基带调试</span>
+                                <span><strong>全网扫频 · 定时锁频 · AT 终端</strong>：频段与小区扫描、按计划锁频锁小区、Web 直接下发 AT 指令做基带调试</span>
                             </li>
                             <li class="flex items-start gap-2">
                                 <span class="text-sky-500 font-bold">✓</span>
-                                <span><strong>短信中枢服务</strong>：网页直观收发短信，支持中文与 emoji、多段发送与进度确认，接收运营商套餐扣费与流量通知</span>
+                                <span><strong>短信中枢</strong>：UTF-16 中文与 emoji、多段长短信、会话与去重、发送进度确认，确认不明时不自动重发</span>
                             </li>
                             <li class="flex items-start gap-2">
                                 <span class="text-sky-500 font-bold">✓</span>
-                                <span><strong>流量历史与健康自愈</strong>：流量统计持久化、温度缓存联动风扇温控；蜂窝租约异常自动续租恢复，APN 变更失败自动回滚</span>
+                                <span><strong>模组升级 · 事件推送 · 温度联动</strong>：FOTA 升级、信号巡检与事件推送；随包温度桥接把芯片温度写入 <code class="font-mono">/var/run/mt5700m/temperature</code> 供风扇温控使用</span>
                             </li>
                         </ul>
                     </div>
                     <div class="mt-6 pt-4 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-500">
-                        <span>驱动作者：FAN789</span>
+                        <span>插件作者：LianXia233</span>
                         <span class="text-sky-600 font-medium">即插即用 · 全网通</span>
                     </div>
                 </div>
@@ -717,7 +717,7 @@
                     <p class="text-xs text-slate-600 leading-relaxed space-y-2">
                         1. 设备启动后自动搜寻并连接 5G 蜂窝基站，默认 Wi-Fi 为 <code class="font-mono text-slate-800 font-bold">OWRT</code>（密码 <code class="font-mono">12345678</code>）。<br>
                         2. 浏览器访问 <code class="font-mono font-bold text-sky-700">192.168.10.1</code>，账号 <code class="font-mono font-bold">root</code>，无密码直接回车。<br>
-                        3. 进入「网络 ➔ MT5700M 5G 模组」查看信号强度、锁定优势频段或收发短信。
+                        3. 进入「网络 ➔ 移动网络 ➔ 5G 模组管理」查看信号强度、锁定优势频段或收发短信。
                     </p>
                 </div>
             </div>
@@ -791,7 +791,7 @@
                         <span>FAN789</span>
                         <span class="text-xs text-slate-400 group-hover:text-sky-500">↗</span>
                     </div>
-                    <p class="text-xs text-slate-500 mt-1">研发 MT5700M 模组控制、智能温控与网络模式核心专属插件</p>
+                    <p class="text-xs text-slate-500 mt-1">研发智能温控与网络模式核心专属插件（其 MT5700M 模组控制插件已由 luci-app-mt5700 取代）</p>
                 </a>
 
                 <a href="https://github.com/LianXia233" target="_blank" rel="noopener noreferrer" class="p-4 rounded-2xl bg-slate-50 hover:bg-sky-50/60 border border-slate-200/60 transition-all group">
@@ -799,7 +799,7 @@
                         <span>LianXia233</span>
                         <span class="text-xs text-slate-400 group-hover:text-sky-500">↗</span>
                     </div>
-                    <p class="text-xs text-slate-500 mt-1">项目构建调优、日常 Actions 维护与自动化发布</p>
+                    <p class="text-xs text-slate-500 mt-1">luci-app-mt5700 模组管理插件（LuCI + Rust/Tokio 单包融合）与项目构建调优、Actions 维护</p>
                 </a>
             </div>
         </section>
@@ -1059,7 +1059,7 @@
                                 <span class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
                                 <div>
                                     <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">openwrt-mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade.bin</p>
-                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 集成 MT5700M 驱动/风扇温控/网络模式/TTYD/HomeProxy</p>
+                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 集成 MT5700M 模组管理/风扇温控/网络模式/TTYD/HomeProxy</p>
                                 </div>
                             </div>
                             <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>

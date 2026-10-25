@@ -230,76 +230,87 @@ jobs:
           $GITHUB_WORKSPACE/Scripts/Packages.sh
           $GITHUB_WORKSPACE/Scripts/Handles.sh
 
-      - name: Smoke Test MT5700M Package
-        # 在耗时编译前，对刚 clone 的 FAN789/luci-app-mt5700m 执行其上游
-        # .github/workflows/ci.yml 同款静态检查与回归测试。上游引入语法错误、
-        # 编译破坏或行为回归时在此尽早失败，避免数小时后才在 Compile Firmware
-        # 暴露。ubuntu-latest 自带 gcc / python3 / node / jq；msgfmt 依赖
-        # gettext（已在 Initialization Environment 安装）。
+      - name: Smoke Test luci-app-mt5700
+        # 在耗时编译前，对刚 clone 的 LianXia233/luci-app-mt5700 做结构校验、
+        # 语法检查与上游回归测试（用例取自其 .github/workflows/build-openwrt.yml）。
+        # 上游改动、脚本语法错误、深度适配注入失效都在这里尽早暴露，而不是
+        # 数小时后才在 Compile Firmware 里失败。
+        # runner 自带 node / jq / gcc；gettext 已在 Initialization Environment 安装。
         run: |
-          cd ./wrt/package/luci-app-mt5700m
+          cd ./wrt/package/luci-app-mt5700
+
+          echo "==> 结构校验（含本仓库深度适配注入）"
+          # Scripts/Packages.sh 会做两处注入：src/Makefile 的预编译后端分支、
+          # root 下的模组温度桥接三件套。任一缺失说明克隆或注入失败，编译必然出错。
+          test -f src/Makefile
+          test -f src/rust/Cargo.toml
+          test -f src/rust/Cargo.lock
+          grep -q 'MT5700_PREBUILT_HOOK' src/Makefile
+          grep -q 'at-webserver-rust' src/Makefile
+          test -x root/usr/sbin/mt5700-temp-bridge
+          test -x root/etc/init.d/mt5700-temp-bridge
+          test -x root/etc/uci-defaults/93-mt5700-temp-bridge
+          test -x root/etc/init.d/at-webserver
+          test -x root/etc/uci-defaults/at-webserver
+          test -x root/etc/hotplug.d/iface/99-at-webserver
+          test -x root/etc/hotplug.d/usb/99-at-webserver
+          test -x root/usr/libexec/at-webserver/on-uplink.sh
 
           echo "==> Shell 语法检查"
+          # tests/iface/interface-selection.sh 需要真机 uci 环境才能跑，这里只查语法
           for SH in \
-            luci-app-mt5700m/root/etc/hotplug.d/usb/60-mt5700m \
-            luci-app-mt5700m/root/etc/init.d/mt5700m-manager \
-            luci-app-mt5700m/root/etc/init.d/mt5700m-traffic \
-            luci-app-mt5700m/root/etc/hotplug.d/net/95-mt5700m-traffic \
-            luci-app-mt5700m/root/etc/uci-defaults/90-mt5700m \
-            luci-app-mt5700m/root/etc/uci-defaults/92-mt5700m-traffic \
-            luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m \
-            luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m-traffic \
-            luci-app-mt5700m/root/usr/sbin/mt5700m-at \
-            luci-app-mt5700m/root/usr/sbin/mt5700m-read \
-            luci-app-mt5700m/root/usr/sbin/mt5700m-manager \
-            luci-app-mt5700m/root/usr/sbin/mt5700m-traffic \
-            luci-app-mt5700m/root/usr/share/mt5700m/usb.sh \
-            luci-app-mt5700m/root/usr/share/mt5700m/health.sh \
-            luci-app-mt5700m/root/usr/share/mt5700m/lock.sh \
-            luci-app-mt5700m/root/usr/share/mt5700m/profile.sh; do
+            root/etc/init.d/at-webserver \
+            root/etc/init.d/mt5700-temp-bridge \
+            root/etc/uci-defaults/at-webserver \
+            root/etc/uci-defaults/93-mt5700-temp-bridge \
+            root/etc/hotplug.d/iface/99-at-webserver \
+            root/etc/hotplug.d/usb/99-at-webserver \
+            root/usr/sbin/mt5700-temp-bridge \
+            root/usr/libexec/at-webserver/on-uplink.sh \
+            tests/iface/interface-selection.sh; do
             sh -n "$SH"
           done
 
-          echo "==> Shell 回归测试"
-          sh luci-app-mt5700m/tests/test-usb-detection.sh
-          sh luci-app-mt5700m/tests/test-temperature-cache.sh
-          sh luci-app-mt5700m/tests/test-read-cache.sh
-          sh luci-app-mt5700m/tests/test-command-contract.sh
-          sh luci-app-mt5700m/tests/test-hotplug-debounce.sh
-          sh luci-app-mt5700m/tests/test-traffic-interface.sh
-
-          echo "==> 原生传输程序编译与模拟测试"
-          gcc -O2 -Wall -Wextra -Werror mt5700m-transport/src/transport.c -o /tmp/mt5700m-transport-test
-          TRANSPORT_BIN=/tmp/mt5700m-transport-test python3 mt5700m-transport/tests/test_transport.py -v
-
-          echo "==> 可执行位检查"
-          test -x luci-app-mt5700m/root/usr/sbin/mt5700m-read
-          test -x luci-app-mt5700m/root/usr/sbin/mt5700m-traffic
-          test -x luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m-traffic
-          test -x luci-app-mt5700m/root/etc/init.d/mt5700m-traffic
-          test -x luci-app-mt5700m/root/etc/hotplug.d/net/95-mt5700m-traffic
-          test -x luci-app-mt5700m/root/etc/uci-defaults/92-mt5700m-traffic
-
           echo "==> LuCI JavaScript 语法检查"
-          find luci-app-mt5700m/htdocs -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+          find htdocs -type f -name '*.js' -print0 | xargs -0 -n1 node --check
 
-          echo "==> UI 错误处理与短信解码测试"
-          node tests/test-ui-errors.js
-          node tests/test-sms-decode.js
-          sh tests/test-action-lock.sh
-          sh tests/test-sms-jobs.sh
-          sh tests/test-health.sh
-          sh tests/test-profile-rollback.sh
-          node tests/test-sms-ui.js
+          echo "==> 前端解析与 ucode JSON 回归测试"
+          for T in \
+            apn-channel-test.js \
+            ca-status-test.js \
+            cellular-icon-test.js \
+            parse-regression-test.js \
+            pdp-addr-test.js \
+            signal-chart-test.js \
+            switch-rollback-test.js \
+            tabmenu-test.js \
+            ucode-json-test.js \
+            mock-modem/temp-level-test.js; do
+            node "tests/$T"
+          done
 
           echo "==> JSON 元数据校验"
-          jq empty luci-app-mt5700m/root/usr/share/luci/menu.d/luci-app-mt5700m.json
-          jq empty luci-app-mt5700m/root/usr/share/rpcd/acl.d/luci-app-mt5700m.json
+          jq empty root/usr/share/luci/menu.d/luci-app-mt5700.json
+          jq empty root/usr/share/rpcd/acl.d/luci-app-mt5700.json
 
-          echo "==> 翻译文件校验"
-          msgfmt --check --check-format -o /dev/null luci-app-mt5700m/po/zh_Hans/mt5700m.po
+          echo "==> 翻译编译校验"
+          # 上游 po 存在重复 msgid（「定时锁频」「运行日志」各两条），
+          # msgfmt --check 会判 fatal，但 luci.mk 打包实际用 po2lmo 编译 lmo，
+          # 重复项被合并、编译正常。故这里用 feed 里的同一份源码现场构建 po2lmo，
+          # 校验口径与真实打包完全一致。
+          LUCI_SRC="../../feeds/luci/modules/luci-base/src"
+          test -f "$LUCI_SRC/po2lmo.c"
+          rm -rf /tmp/po2lmo-src && cp -a "$LUCI_SRC" /tmp/po2lmo-src
+          (
+            cd /tmp/po2lmo-src
+            gcc -O2 -o lemon contrib/lemon.c
+            ./lemon -q -l T=contrib/lempar.c lib/plural_formula.y
+            gcc -O2 -I. -o /tmp/po2lmo-bin po2lmo.c lib/lmo.c lib/plural_formula.c
+          )
+          /tmp/po2lmo-bin po/zh_Hans/luci-app-mt5700.po /tmp/luci-app-mt5700.zh_Hans.lmo
+          test -s /tmp/luci-app-mt5700.zh_Hans.lmo
 
-          echo "MT5700M package smoke test: ALL PASSED"
+          echo "luci-app-mt5700 package smoke test: ALL PASSED"
 
       - name: Custom Settings
         run: |
@@ -333,6 +344,121 @@ jobs:
           fi
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
+
+      - name: Cross Compile Rust Backend
+        # luci-app-mt5700 的后端是 Rust/Tokio 常驻程序。buildroot 编译阶段的 PATH
+        # 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），没有 cargo/rustc；
+        # 引入 feeds/packages/lang/rust 又需现场编译 LLVM（1~2 小时、约 20GB 磁盘），
+        # 不适合 CI。故这里用 runner 自带 rustup 交叉编译出与固件架构一致的静态
+        # musl 二进制，由 Scripts/Packages.sh 注入的 MT5700_PREBUILT_HOOK 直接装包；
+        # 万一产物缺失，上游 src/Makefile 仍会回退到 cargo build。
+        #
+        # 链接器用 zig（与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target
+        # 不自带 libc 与启动对象，且 ring（rustls 的 TLS 实现）含 C 代码需要 C 编译器，
+        # zig cc 一次提供两者，免装目标板交叉工具链。
+        if: env.WRT_TEST != 'true'
+        run: |
+          cd ./wrt/
+
+          # 预编译产物必须与固件架构一致：架构不符时包能装上、运行时才报
+          # Exec format error，故在编译前硬性校验（本固件目标为 MT7981/Filogic）。
+          ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"/\1/p' .config | head -1)
+          if [ -z "$ARCH_PACKAGES" ]; then
+            echo "::error::.config 未解析出 CONFIG_TARGET_ARCH_PACKAGES，无法确定 Rust 目标架构"
+            exit 1
+          fi
+          case "$ARCH_PACKAGES" in
+            aarch64_cortex-a53)
+              RUST_TARGET=aarch64-unknown-linux-musl
+              ZIG_TARGET=aarch64-linux-musl
+              ;;
+            *)
+              echo "::error::本步骤的预编译只覆盖 aarch64_cortex-a53（H5000M 为 aarch64 Filogic），当前 ARCH_PACKAGES=$ARCH_PACKAGES"
+              exit 1
+              ;;
+          esac
+          echo "Rust 目标：$RUST_TARGET（ARCH_PACKAGES=$ARCH_PACKAGES）"
+
+          echo "==> 准备 Rust 工具链"
+          if ! command -v cargo >/dev/null 2>&1; then
+            # 兜底：runner 镜像不再预装 Rust 时按需安装（minimal profile 即可）
+            curl -sSf --retry 3 https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+          fi
+          rustup target add "$RUST_TARGET"
+          cargo --version
+          rustc --version
+
+          echo "==> 准备 zig 交叉链接器"
+          # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
+          # 两条下载链路都在 CI 上偶发卡住；venv 隔离，不污染 runner 的 Python 环境。
+          python3 -m venv /tmp/zig-venv
+          /tmp/zig-venv/bin/pip install --quiet "ziglang==0.13.0"
+          ZIG="$(/tmp/zig-venv/bin/python -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
+          chmod +x "$ZIG"
+          "$ZIG" version
+
+          # cc-rs / cargo 会把 --target= 原样传给被包装的编译器，而 zig 只接受自己的
+          # target query；包装脚本统一丢弃外部 --target=、过滤 lld 不认的
+          # --fix-cortex-a53-843419，再显式指定 zig target。
+          export ZIG ZIG_TARGET
+          mkdir -p /tmp/zig-wrap
+          cat > /tmp/zig-wrap/zig-cc <<'WRAP'
+          #!/usr/bin/env bash
+          args=()
+          for a in "$@"; do
+          	case "$a" in
+          		--target=*|*--fix-cortex-a53*) ;;
+          		*) args+=("$a") ;;
+          	esac
+          done
+          exec "$ZIG" cc -target "$ZIG_TARGET" "${args[@]}"
+          WRAP
+          cat > /tmp/zig-wrap/zig-ar <<'WRAP'
+          #!/usr/bin/env bash
+          args=()
+          for a in "$@"; do
+          	case "$a" in
+          		--target=*) ;;
+          		*) args+=("$a") ;;
+          	esac
+          done
+          exec "$ZIG" ar "${args[@]}"
+          WRAP
+          chmod +x /tmp/zig-wrap/zig-cc /tmp/zig-wrap/zig-ar
+
+          echo "==> 交叉编译 at-webserver"
+          cd package/luci-app-mt5700/src/rust
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/tmp/zig-wrap/zig-cc
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_AR=/tmp/zig-wrap/zig-ar
+          export CC_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-cc
+          export AR_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-ar
+          export RUSTFLAGS="-C link-self-contained=no"
+          # --locked：Cargo.lock 由上游固定，避免 CI 上解析出与发布产物不同的依赖树
+          CARGO_TARGET_DIR=/tmp/mt5700-target \
+            cargo build --release --locked --target "$RUST_TARGET"
+
+          echo "==> 产物自检"
+          BIN="/tmp/mt5700-target/$RUST_TARGET/release/at-webserver"
+          file "$BIN"
+          file "$BIN" | grep -q 'ARM aarch64' || { echo "::error::后端不是 aarch64 ELF"; exit 1; }
+          file "$BIN" | grep -q 'statically linked' || { echo "::error::后端不是静态链接"; exit 1; }
+          readelf -d "$BIN" | grep -q 'no dynamic section' || {
+            echo "::error::后端带动态段，固件缺少对应 musl 动态库时无法启动"
+            readelf -d "$BIN"
+            exit 1
+          }
+          BIN_SIZE=$(stat -c %s "$BIN")
+          if [ "$BIN_SIZE" -lt 1000000 ]; then
+            echo "::error::后端体积异常（$BIN_SIZE 字节），疑似构建未完成"
+            exit 1
+          fi
+
+          mkdir -p ../prebuilt
+          cp -f "$BIN" ../prebuilt/at-webserver
+          chmod 0755 ../prebuilt/at-webserver
+          ls -l ../prebuilt/
+          echo "luci-app-mt5700 预编译后端就绪：$BIN_SIZE 字节"
 
       - name: Download Packages
         if: env.WRT_TEST != 'true'
@@ -410,4 +536,4 @@ jobs:
             内核版本：${{env.WRT_KVER}}
             插件列表：${{env.WRT_LIST}}
 
-            MT5700M 插件版本：${{env.MT5700M_VERSION}}
+            MT5700M 插件版本：${{env.MT5700_VERSION}}

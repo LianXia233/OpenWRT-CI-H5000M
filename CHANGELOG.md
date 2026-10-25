@@ -2,6 +2,100 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-25] 新增并深度适配 LianXia233/luci-app-mt5700（取代 FAN789/luci-app-mt5700m）
+
+### 背景
+
+模组管理插件切换为 [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700)
+（当前 v1.30.4，后端 `at-webserver` 1.29.0）：单包融合 LuCI 前端（12 个页面）与
+Rust/Tokio 常驻后端 `/usr/bin/at-webserver-rust`，rpcd ucode 插件经
+`nc 127.0.0.1 <port>` 调后端 JSON-RPC，服务 `/etc/init.d/at-webserver`、
+配置 `/etc/config/at-webserver`，入口 `网络 → 移动网络 → 5G 模组管理`。
+
+直接 clone 接入会踩三个坑，故本次做深度适配：
+
+1. **Rust 后端无法在 buildroot 内编译**：`rules.mk` 在包编译阶段
+   `export PATH:=$(TARGET_PATH)`，PATH 里没有 `~/.cargo/bin`；改用
+   `feeds/packages/lang/rust` 的 host rust 需现场编译 LLVM（1~2 小时、约 20GB 磁盘）。
+2. **与现有插件争抢 AT 串口**：旧插件 `luci-app-mt5700m`（`mt5700m-transport`
+   持有串口）与本插件（Rust 后端持有串口）互斥，并存必然随机超时。
+3. **风扇温控失去模组温度**：`luci-app-h5000m-fancontrol` 读
+   `/var/run/mt5700m/temperature`（`updated=` 秒级时间戳 + `temperature=`，60 秒老化），
+   该文件由旧插件的 `mt5700m-manager` 维护；新插件把温度留在自己的后端缓存里。
+
+### 变更
+
+- `Scripts/Packages.sh`：
+  - 移除 `UPDATE_PACKAGE "luci-app-mt5700m" "FAN789/luci-app-mt5700m" "main"`，
+    新增 `UPDATE_PACKAGE "luci-app-mt5700" "LianXia233/luci-app-mt5700" "main"`；
+    删除 `qmodem`（FUjr/QModem）clone 行——该行此前与注释不一致，实际仍在
+    clone，且 QModem 同样争抢串口。
+  - 新增互斥清理：`rm -rf ./luci-app-mt5700m` 后断言目录不存在，防止日后有人
+    恢复 clone 行时静默并存。
+  - 新增克隆结构校验（`Makefile`、`src/Makefile`、`src/rust/{Cargo.toml,Cargo.lock}`、
+    `root/etc/init.d/at-webserver`、`root/etc/config/at-webserver`、
+    `root/usr/share/rpcd/ucode/mt5700.uc`、menu.d / acl.d JSON、
+    一个 htdocs 视图、`po/zh_Hans/luci-app-mt5700.po`），并把版本写入
+    `GITHUB_ENV` 的 `MT5700_VERSION`（插件版本 / 后端版本）。
+  - `PREPARE_MT5700_PREBUILT()`：幂等改写 `src/Makefile` 的 `compile` 目标——
+    存在 `src/prebuilt/at-webserver` 时直接复制到 `$(BIN)`，否则回退上游
+    `cargo build`；带 `MT5700_PREBUILT_HOOK` 标记，`re.subn` 命中数不为 1 或
+    缺少 `install:` 目标时立即失败（上游改结构会显式报错而不是静默编旧逻辑）。
+  - `INJECT_MT5700_TEMP_BRIDGE()`：注入 `root/usr/sbin/mt5700-temp-bridge`
+    （每 30s 经 `ubus call mt5700 at` 取 `AT^CHIPTEMP?`，解析 12 路传感器、
+    取峰值，按旧格式原子写入 `/var/run/mt5700m/temperature`）、
+    `root/etc/init.d/mt5700-temp-bridge`（procd，START=99）与
+    `root/etc/uci-defaults/93-mt5700-temp-bridge`（首次启动 enable）。
+- `Config/GENERAL.txt`：`CONFIG_PACKAGE_luci-app-mt5700m` /
+  `CONFIG_PACKAGE_luci-i18n-mt5700m-zh-cn` 改为 `luci-app-mt5700` /
+  `luci-i18n-mt5700-zh-cn`；移除 `CONFIG_PACKAGE_flock`（串口互斥已由 Rust
+  后端内部完成）；保留 `odhcp6c`（蜂窝 IPv6 租约）；注释说明 `nc` / `timeout`
+  由 busybox 默认配置提供（`BUSYBOX_DEFAULT_NC` / `TIMEOUT` 默认 y），
+  无需额外选包，`luci-base` 已带 `rpcd` + `rpcd-mod-ucode` + ucode 模块。
+- `.github/workflows/WRT-CORE.yml`：
+  - `Smoke Test MT5700M Package` 整体替换为 `Smoke Test luci-app-mt5700`：
+    深度适配注入校验（`MT5700_PREBUILT_HOOK`、温度桥接三件套、可执行位）、
+    9 个 shell 脚本 `sh -n`、全部 htdocs JS `node --check`、10 个上游回归测试、
+    menu.d / acl.d `jq empty`、翻译用 **`po2lmo` 编译校验**（上游 po 有 2 处
+    重复 msgid，`msgfmt --check` 会判 fatal，而 luci.mk 实际用 po2lmo 编译 lmo，
+    故从 feed 的 `luci-base/src` 现场构建 po2lmo，口径与打包一致）。
+  - 新增 `Cross Compile Rust Backend` 步骤（`Custom Settings` 之后、
+    `Download Packages` 之前）：从 `.config` 读 `CONFIG_TARGET_ARCH_PACKAGES`，
+    非 `aarch64_cortex-a53` 直接失败（目标架构不符会「装得上、跑不起来」）；
+    rustup 安装 `aarch64-unknown-linux-musl` target，pip 安装 `ziglang==0.13.0`
+    作交叉链接器（含 cc-rs 兼容包装：丢弃外部 `--target=`、过滤
+    `--fix-cortex-a53-843419`），`cargo build --release --locked` 后校验
+    「ARM aarch64 / statically linked / 无动态段 / 体积 > 1MB」，再拷到
+    `package/luci-app-mt5700/src/prebuilt/at-webserver`。
+  - Release Notes 版本行 `MT5700M 插件版本` 改取 `MT5700_VERSION`。
+- `README.md` / `index.html`：插件章节改写为 `luci-app-mt5700`（12 页面矩阵、
+    服务与配置路径、温度桥接、预编译后端构建方式），并显式标注与
+    `luci-app-mt5700m`、QModem 不兼容；鸣谢补充 LianXia233。
+
+### 不兼容说明
+
+`luci-app-mt5700`、`luci-app-mt5700m`、QModem 都独占 MT5700M 的 AT 串口，
+三者两两不能共存。本固件固定只保留 `luci-app-mt5700`，请勿再从软件源手工安装
+其余两者；如需回退，必须先把新插件 `stop` 或卸载，再装旧插件，反之亦然。
+
+### 验证
+
+- 本地用同一套 rustup + zig 交叉编译流程构建后端：
+  `cargo build --release --locked --target aarch64-unknown-linux-musl` 用时
+  2 分 01 秒，产物 2724136 字节、`ELF 64-bit LSB executable, ARM aarch64,
+  statically linked, stripped`、无动态段（`ring` 的 C 代码经 zig cc 编译通过）。
+- 上游 10 个 node 回归测试全部通过；htdocs JS `node --check` 全部通过；
+  menu.d / acl.d `jq empty` 通过；9 个 shell 脚本 `sh -n` 通过；
+  `po2lmo` 编译 `po/zh_Hans/luci-app-mt5700.po` 成功产出 lmo。
+- 待实机验证：`/etc/init.d/at-webserver` 拉起后端、`admin/modem/5g` 菜单渲染、
+  风扇插件读到 `mt5700-temp-bridge` 写入的温度、`MT5700M` 接口自动创建。
+
+### 备注
+
+上游 `src/rust/Cargo.toml` 的 `version = "1.29.0"` 与顶层 `Makefile` 的
+`PKG_VERSION:=1.30.4` 不一致（上游自身问题），本仓库不改上游文件，
+仅在 `MT5700_VERSION` 中同时记录两者。
+
 ## [2026-10-25] 修复机型回退导致编译失败 + 清理 Node 20 弃用告警
 
 ### 背景
