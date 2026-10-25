@@ -49,13 +49,15 @@ CONFIG_PACKAGE_luci-app-wol=n
 CONFIG_CCACHE=y
 CONFIG_DEVEL=y
 CONFIG_FEED_video=n
-# 2026-10-23 修复：此处原为 MULTI_PROFILE=y，因 WRT-CORE 的 Custom Settings 先追加
-# 设备配置（MEDIATEK-WIFI-YES.txt 中为 n）后追加本文件，Kconfig 对重复符号
-# 后读覆盖，实际会编译整个 filogic 平台全部 profile（数十台设备），与
-# 「仅编译 Hiveton H5000M」意图相反且浪费大量 CI 时间。改回 n 保持单设备构建。
+# 2026-10-25 修正：真正决定编译机型的是设备配置中的 Target Profile 符号
+# （MULTI_PROFILE=n 时为 CONFIG_TARGET_mediatek_filogic_DEVICE_hiveton_h5000m）。
+# 2026-10-23 误判为「追加顺序导致覆盖」，实际此前是设备配置只写了
+# CONFIG_TARGET_DEVICE_...（仅 MULTI_PROFILE=y 时生效），机型静默回退到
+# target.mk 的 DEFAULT_PROFILE（filogic = openwrt_one）。详见 CHANGELOG。
 CONFIG_TARGET_MULTI_PROFILE=n
 # 单设备构建下 per-device rootfs 无意义，与 MULTI_PROFILE=n 保持一致
 CONFIG_TARGET_PER_DEVICE_ROOTFS=n
+# Hiveton H5000M 仅产出 sysupgrade.bin，无需 initramfs
 CONFIG_TARGET_ROOTFS_INITRAMFS=n
 
 # 内核模块 - 存储
