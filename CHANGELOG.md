@@ -2,6 +2,59 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-28] UPnP 插件改用 VIKINGYFY/packages 源（miniupnpd + luci-app-upnp）
+
+### 背景
+
+上游 VIKINGYFY/OpenWRT-CI 于 2026-10-27 把 `miniupnpd` 与 `luci-app-upnp`
+纳入其 `VIKINGYFY/packages` 仓库，并在 viking 包组中启用。本仓库同步该
+做法，UPnP（IGD / PCP / NAT-PMP 端口自动映射）改用同一维护源，与上游
+保持一致的版本节奏与补丁基线。
+
+**未涉及主题**：`MTK-AUTO.yml` / `WRT-BUILD.yml` 的 `WRT_THEME: aurora`、
+`Scripts/Packages.sh` 的 aurora / aurora-config 源、`Scripts/Handles.sh`
+的 aurora 菜单样式修复均原样保留，本次不做主题相关改动。
+
+### 变更
+
+- `Scripts/Packages.sh`：viking 包组清理名单追加 `miniupnpd`、
+  `luci-app-upnp`：
+
+  ```diff
+  -UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac sing-box luci-app-homeproxy luci-app-timewol luci-app-wolplus luci-app-wolultra"
+  +UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "axonhub gecoosac miniupnpd sing-box luci-app-homeproxy luci-app-timewol luci-app-upnp luci-app-wolplus luci-app-wolultra"
+  ```
+
+  该名单在克隆前会 `rm -rf` 掉 `../feeds/luci/`、`../feeds/packages/` 下所有
+  名字匹配的目录，因此 immortalwrt feeds 自带的 `miniupnpd` /
+  `luci-app-upnp` 会被清除，改用 viking 源。
+
+### 说明
+
+- 编译配置无需改动：`Config/GENERAL.txt` 已有
+  `CONFIG_PACKAGE_luci-app-upnp=y`（在「新增实用插件」区块内），且
+  `Custom Settings` 步骤在非 TEST 模式下必叠加 GENERAL.txt；
+- `miniupnpd` 不需要单独选中：`luci-app-upnp` 的
+  `LUCI_DEPENDS:=+luci-base +miniupnpd +rpcd-mod-ucode` 会自动带出；
+  viking 源用 `PROVIDES:=miniupnpd` + `DEFAULT_VARIANT:=1` 定义两个变体
+  （`miniupnpd-iptables` / `miniupnpd-nftables`），依赖 `+miniupnpd` 会解析
+  到默认的 **nftables 变体**，与本仓库 `kmod-nft-*`（firewall4）栈一致；
+- 版本约束自洽：`luci-app-upnp` 的
+  `LUCI_EXTRA_DEPENDS:=miniupnpd (>=20261027-r7)` 与同源 `miniupnpd` 的
+  `PKG_VERSION:=20261027` / `PKG_RELEASE:=7` 完全吻合，不会在 world 安装
+  阶段因约束不满足而失败（与 homeproxy 的 sing-box ≥1.15.0 那类问题同构，
+  此处不存在）；
+- 与现有 feed 补丁修复的兼容：`WRT-CORE.yml` 的「Update Feeds」步骤中有一处
+  针对 feeds 的 `feeds/packages/net/miniupnpd/patches/020-descr-filter-fix.patch`
+  删除。该步骤带 `-f` 守卫，而本改动会在后续「Custom Packages」阶段删除整个
+  feeds miniupnpd 目录，故它自动退化为 no-op，**不会报错、无需删除**，
+  作为以后切回 feeds 源时的保险保留；
+- viking 源的 `miniupnpd/patches/` 仅含 `010-upnp-igdv2-compat.patch` 与
+  `900-miniupnpd-format-xml-to-make-some-app-happy.patch`，不是 2.3.11 那次
+  失配的 020（两个补丁已在兄弟仓库独立复验整链可应用），不会复现补丁失配
+  导致的编译中断；
+- `index.html`（介绍页）本就含 UPnP 标签，无需同步修改。
+
 ## [2026-10-26] 风扇温控按固件分流：MT5700 固件换用 LianXia233 Rust 重写版，MT5700M 固件沿用 FAN789 原版
 
 ### 背景
