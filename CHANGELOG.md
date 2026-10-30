@@ -2,6 +2,35 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-30] 修复 homeproxy ucode 模块导出缺失（hasForceProxyRules）
+
+### 背景
+
+`Scripts/homeproxy/generate_client.uc` 覆盖上游 `luci-app-homeproxy` 的同名
+脚本，该版本在 `import { ... } from 'homeproxy'` 中引入了
+`hasForceProxyRules`，并用它决定 `bypass_mainland_china` 模式是否启用
+geoip-cn 快速旁路。本仓库当前未覆盖该脚本，但一旦后续引入覆盖版
+`generate_client.uc`，同样的错配会立刻出现，`homeproxy.uc` 仍来自 `VIKINGYFY/packages`，
+其中并未导出该符号，构建出的固件在服务启动与订阅更新阶段直接抛：
+
+    Syntax error: Module /etc/homeproxy/scripts/homeproxy.uc does not export 'hasForceProxyRules'
+
+客户端配置因此无法生成，`/var/run/homeproxy/sing-box-c.json` 缺失，
+代理全面失效，订阅更新以 exit code 2 退出。
+
+### 变更
+
+- `Scripts/Handles.sh`：在 homeproxy 资源预设段之后新增幂等防御逻辑，
+  仅当 `generate_client.uc` 引用该符号且 `homeproxy.uc` 未导出时才追加
+  实现；上游补齐或未启用覆盖时该段自动跳过。
+
+### 验证
+
+修复后 `ucode -L /etc/homeproxy/scripts -e 'import { hasForceProxyRules } from "homeproxy"'`
+导入通过；`sing-box check` 无 error；无 Proxy List 时
+`route_exclude_address_set` 正确输出 `["geoip-cn"]`（快速旁路生效）；
+代理与直连均正常。
+
 ## [2026-10-28] UPnP 插件改用 VIKINGYFY/packages 源（miniupnpd + luci-app-upnp）
 
 ### 背景

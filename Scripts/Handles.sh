@@ -199,6 +199,33 @@ if [ -n "$HP_DIR" ]; then
 	fi
 fi
 
+#生成器依赖 homeproxy.uc 的 hasForceProxyRules 导出（防御性检查）
+# 若后续把 generate_client.uc 也改为覆盖版，缺少该导出会让 ucode 直接报
+# Syntax error: Module .../homeproxy.uc does not export 'hasForceProxyRules'
+HP_SCRIPTS="$HP_DIR/root/etc/homeproxy/scripts"
+if [ -n "$HP_DIR" ] && [ -d "$HP_SCRIPTS" ] && \
+   grep -q 'hasForceProxyRules' "$HP_SCRIPTS/generate_client.uc" 2>/dev/null && \
+   ! grep -q 'export function hasForceProxyRules' "$HP_SCRIPTS/homeproxy.uc" 2>/dev/null; then
+	echo " "
+	cat >> "$HP_SCRIPTS/homeproxy.uc" <<'HP_FORCE_PATCH'
+
+/* A non-empty proxy list pins those domains to the main outbound, so
+ * bypass_mainland_china mode must not take the fast path (geoip-cn address
+ * set exclusion) - otherwise the direct rules would capture them first. */
+export function hasForceProxyRules(uci, config, proxy_domain_list) {
+	if (length(proxy_domain_list))
+		return true;
+
+	return length(normalizeDomainList(readfile(`${HP_DIR}/resources/proxy_list.txt`))) > 0;
+};
+HP_FORCE_PATCH
+	if grep -q 'export function hasForceProxyRules' "$HP_SCRIPTS/homeproxy.uc"; then
+		echo "homeproxy hasForceProxyRules export restored!"
+	else
+		echo "homeproxy hasForceProxyRules patch failed; continuing!"
+	fi
+fi
+
 #修改argon主题字体和颜色
 if [ -d "$PKG_PATH/luci-theme-argon" ]; then
 	echo " "
