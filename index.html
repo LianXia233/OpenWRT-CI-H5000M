@@ -8,9 +8,70 @@
     <meta name="keywords" content="OpenWRT, ImmortalWrt, Hiveton H5000M, MT5700M, 5G CPE, Filogic, 联发科, 锁频, 智能温控, GitHub Actions, 固件下载">
     <meta property="og:title" content="Hiveton H5000M 5G CPE 定制固件">
     <meta property="og:description" content="基于 ImmortalWrt 主线，集成 MT5700M 模组驱动、双温感智能风扇温控与网络双链路无缝切换。">
-    <meta property="og:image" content="https://files.seeusercontent.com/2026/06/29/uu4H/bg1.jpg">
+    <meta property="og:image" content="https://files.seeusercontent.com/2026/10/31/aE1a/145952531_p1.jpg">
     <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com">
+    // --- Wallpaper Control Panel Logic ---
+    const toggleWallpaperMenu = document.getElementById('toggleWallpaperMenu');
+    const wallpaperControlPanel = document.getElementById('wallpaperControlPanel');
+    const closeWallpaperPanel = document.getElementById('closeWallpaperPanel');
+    const opacitySlider = document.getElementById('opacitySlider');
+    const opacityValLabel = document.getElementById('opacityValLabel');
+    const blurSlider = document.getElementById('blurSlider');
+    const blurValLabel = document.getElementById('blurValLabel');
+
+    if (toggleWallpaperMenu && wallpaperControlPanel) {
+        toggleWallpaperMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+            wallpaperControlPanel.classList.toggle('hidden');
+        });
+        if (closeWallpaperPanel) {
+            closeWallpaperPanel.addEventListener('click', () => {
+                wallpaperControlPanel.classList.add('hidden');
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (!wallpaperControlPanel.contains(e.target) && e.target !== toggleWallpaperMenu) {
+                wallpaperControlPanel.classList.add('hidden');
+            }
+        });
+    }
+
+    if (opacitySlider) {
+        opacitySlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            const dec = (val / 100).toFixed(2);
+            document.querySelectorAll('.glass-card-white').forEach(el => {
+                el.style.backgroundColor = `rgba(255, 255, 255, ${dec})`;
+            });
+            document.querySelectorAll('.glass-card-light').forEach(el => {
+                el.style.backgroundColor = `rgba(255, 255, 255, ${Math.max(0.4, dec - 0.08)})`;
+            });
+            opacityValLabel.textContent = `${val}%`;
+        });
+    }
+
+    if (blurSlider) {
+        blurSlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            document.documentElement.style.setProperty('--wallpaper-blur', `${val}px`);
+            blurValLabel.textContent = `${val} px`;
+        });
+    }
+
+    // --- Zen Mode Toggle ---
+    function toggleZenMode() {
+        document.body.classList.toggle('zen-mode');
+        if (wallpaperControlPanel) wallpaperControlPanel.classList.add('hidden');
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.body.classList.contains('zen-mode')) {
+            document.body.classList.remove('zen-mode');
+        }
+    });
+
+</script>
     <script>
         tailwind.config = {
             theme: {
@@ -39,7 +100,7 @@
         /* 全局背景壁纸：使用用户指定原图，不压缩 */
         body {
             background-color: #f8fafc;
-            background-image: url('https://files.seeusercontent.com/2026/06/29/uu4H/bg1.jpg');
+            background-image: url('https://files.seeusercontent.com/2026/10/31/aE1a/145952531_p1.jpg');
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -98,9 +159,112 @@
         .animate-pulse-dot {
             animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
+    
+        :root {
+            --card-opacity: 0.92;
+            --wallpaper-blur: 0px;
+        }
+
+        /* 纯享壁纸模式 (Zen Mode) */
+        body.zen-mode .main-content-flow {
+            opacity: 0 !important;
+            pointer-events: none;
+            transform: scale(0.98);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+        body.zen-mode .wallpaper-tint-overlay {
+            background: rgba(0, 0, 0, 0.02) !important;
+        }
+        body.zen-mode #zenExitHint {
+            display: flex !important;
+        }
+
+        /* 保证壁纸透亮可见的轻柔氛围渐变蒙层 */
+        .wallpaper-tint-overlay {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at 50% 15%, rgba(255, 255, 255, 0.38) 0%, rgba(248, 250, 252, 0.60) 65%, rgba(241, 245, 249, 0.72) 100%);
+            backdrop-filter: blur(var(--wallpaper-blur));
+            -webkit-backdrop-filter: blur(var(--wallpaper-blur));
+            pointer-events: none;
+            z-index: 0;
+            transition: backdrop-filter 0.3s ease, background 0.3s ease;
+        }
+
+        /* 浮动壁纸控制面板 */
+        .wallpaper-control-panel {
+            position: fixed;
+            top: 76px;
+            right: 20px;
+            z-index: 150;
+            width: 320px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            border-radius: 1.25rem;
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(15, 23, 42, 0.05);
+            padding: 20px;
+        }
+        @media (max-width: 640px) {
+            .wallpaper-control-panel {
+                left: 12px;
+                right: 12px;
+                width: auto;
+                top: 68px;
+            }
+        }
+
     </style>
 </head>
 <body class="flex flex-col min-h-screen relative selection:bg-sky-500 selection:text-white">
+
+    <!-- 壁纸氛围底衬 -->
+    <div class="wallpaper-tint-overlay" id="wallpaperOverlay"></div>
+
+    <!-- 纯享壁纸退出提示 (Zen Mode) -->
+    <div id="zenExitHint" class="hidden fixed inset-0 z-50 flex items-center justify-center cursor-pointer bg-black/10 transition-opacity p-4" onclick="toggleZenMode()">
+        <div class="px-5 sm:px-6 py-3 rounded-full flex items-center gap-2.5 sm:gap-3 text-xs sm:text-sm font-semibold text-slate-700 shadow-2xl animate-bounce bg-white/95 border border-white">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+            🖼️ 正在纯享高清壁纸 · 单击屏幕任意处或按 ESC 恢复
+        </div>
+    </div>
+
+    <!-- 浮动壁纸控制面板 -->
+    <div id="wallpaperControlPanel" class="wallpaper-control-panel hidden">
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-200/80">
+            <div class="flex items-center gap-2 font-bold text-sm text-slate-800">
+                <span>🎛️</span>
+                <span>壁纸透视与毛玻璃调节</span>
+            </div>
+            <button id="closeWallpaperPanel" class="text-slate-400 hover:text-slate-600 text-xl leading-none p-1">&times;</button>
+        </div>
+        <div class="space-y-4">
+            <div>
+                <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1.5">
+                    <span>卡片透光度 (壁纸可见度)</span>
+                    <span id="opacityValLabel" class="font-mono text-sky-600 font-bold">92%</span>
+                </div>
+                <input type="range" id="opacitySlider" min="40" max="98" value="92" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-600">
+                <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+                    <span>超通透 (40%)</span>
+                    <span>平衡 (92%)</span>
+                    <span>实白 (98%)</span>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1.5">
+                    <span>背景微虚化 (景深感)</span>
+                    <span id="blurValLabel" class="font-mono text-sky-600 font-bold">0 px</span>
+                </div>
+                <input type="range" id="blurSlider" min="0" max="10" value="0" step="1" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-600">
+            </div>
+            <button onclick="toggleZenMode()" class="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:opacity-95 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all active:scale-[0.98]">
+                <span>🖼️</span> 一键纯享全屏壁纸
+            </button>
+        </div>
+    </div>
+
 
     <!-- 顶部固定导航栏 -->
     <header class="sticky top-0 z-50 glass-nav transition-all duration-300">
@@ -625,7 +789,7 @@
                 </div>
 
                 <!-- 下载加速切换模式开关 -->
-                <div class="bg-slate-100/90 p-1.5 rounded-2xl flex items-center border border-slate-200 shadow-inner">
+                <div class="w-full sm:w-auto bg-slate-200/70 p-1 rounded-2xl flex items-center border border-slate-300/80 shadow-inner gap-1 overflow-x-auto custom-scrollbar">
                     <button id="mode-proxy-btn" onclick="setDownloadMode('proxy')" class="px-4 py-2 rounded-xl text-xs md:text-sm font-bold transition-all bg-white text-sky-700 shadow-sm flex items-center gap-1.5">
                         <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                         <span>🚀 ACG2 极速代理 (推荐)</span>
@@ -814,7 +978,7 @@
                 <a href="https://gh.acg2.mom/" target="_blank" class="hover:text-sky-600 transition-colors">ACG2 极速加速</a>
             </div>
         </div>
-    </footer>
+    </footer></div>
 
     <!-- Toast 提示框 -->
     <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-5 py-2.5 rounded-2xl shadow-2xl text-xs sm:text-sm font-medium z-50 transition-opacity duration-300 opacity-0 pointer-events-none flex items-center gap-2">
@@ -834,7 +998,10 @@
         let latestReleasesData = [];
 
         // 切换下载加速模式
-        function setDownloadMode(mode) {
+        function setDownloadMode(mode, el) {
+        if (el && el.scrollIntoView) {
+            el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
             currentDownloadMode = mode;
             const proxyBtn = document.getElementById('mode-proxy-btn');
             const directBtn = document.getElementById('mode-direct-btn');
@@ -1049,7 +1216,18 @@
                     
                     <div class="grid grid-cols-1 gap-2.5">
                         <div class="p-3.5 rounded-2xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div class="flex items-center gap-3">
+                            <div class="flex items-center gap-2 sm:gap-3">
+
+                    <!-- 壁纸控制抽屉开关 -->
+                    <button id="toggleWallpaperMenu" title="调节壁纸透视与毛玻璃" class="p-1.5 sm:p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-slate-100/80 transition-colors flex items-center gap-1 text-xs font-semibold border border-slate-200/80 bg-white/70 shadow-sm">
+                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                        <span class="hidden md:inline">壁纸</span>
+                    </button>
+                    <!-- 一键纯享壁纸 -->
+                    <button id="btnZenMode" title="一键纯享壁纸" class="p-1.5 sm:p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-slate-100/80 transition-colors border border-slate-200/80 bg-white/70 shadow-sm" onclick="toggleZenMode()">
+                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    </button>
+
                                 <span class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
                                 <div>
                                     <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">openwrt-mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade.bin</p>
