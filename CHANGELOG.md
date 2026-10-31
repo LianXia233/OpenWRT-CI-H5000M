@@ -2,6 +2,55 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-10-31] 默认主题切换为 luci-theme-vantage（Aurora 保留为可选）
+
+### 背景
+
+上游 VIKINGYFY/OpenWRT-CI 已把默认主题从 aurora 换成 `anothaDev/luci-theme-vantage`。
+本仓库同步：`WRT_THEME` 改为 vantage，同时保留 Aurora——
+`luci-theme-aurora` + `luci-app-aurora-config` 继续编入固件，只取消其默认地位，
+用户可在「系统 → 语言和界面」切回。
+
+与"只改一行 WRT_THEME"相比，保留旧主题后有两处必须显式处理：
+
+1. 原脚本固定拼 `CONFIG_PACKAGE_luci-app-$WRT_THEME-config`，对 vantage 会得到
+   不存在的 `luci-app-vantage-config`；该类符号在 defconfig 阶段被静默丢弃，
+   使 `.config` 与真实产物不一致（QModem 仓库同款代码配有
+   `check_defconfig.py` 硬断言，会直接判失败）。
+2. `luci-theme-bootstrap → luci-theme-$WRT_THEME` 的集合依赖替换只保证"主题被安装"，
+   默认样式实际由 `/etc/config/luci` 的 `luci.main.mediaurlbase` 决定；该文件是
+   conffile，sysupgrade 保留旧配置时仍为 `/luci-static/aurora`，而主题自带的
+   `30_luci-theme-*` 脚本仅在主题首次注册时才写该值，升级路径不会切换。
+
+### 变更
+
+- `Scripts/Packages.sh`：新增 `UPDATE_PACKAGE "vantage" "anothaDev/luci-theme-vantage"
+  "main"`（仓库内含 `luci-theme-vantage/` 与 `luci-app-vantage/` 两个包子目录，
+  克隆到 `package/luci-theme-vantage` 后由 buildroot 递归扫描注册）。
+  aurora / aurora-config 两行不变。
+- `Scripts/Settings.sh`：主题配套包改为白名单映射（aurora →
+  `luci-app-aurora-config`、vantage → `luci-app-vantage`、argon →
+  `luci-app-argon-config`）；`WRT_THEME != aurora` 时追加 aurora 两个包以保留可选；
+  新增「默认主题种子」段，生成 `files/etc/uci-defaults/40-luci-default-theme`
+  （排在 `30_luci-theme-*` 之后），首启动把 `mediaurlbase` 指向
+  `/luci-static/$WRT_THEME`，并用 `luci.main.theme_seeded` 记录已种子的默认主题，
+  同一代主题不重复覆盖、用户自选主题不被升级重置。
+- `Scripts/Handles.sh`：新增 vantage 进度条标签字体修复
+  （`anothaDev/luci-theme-vantage#52`，与上游 CI 同一 sed）：`.cbi-progressbar::before`
+  的 mono 字体改为继承正文字体，避免中文/窄屏下取值被截断；命中与否均写日志，
+  上游已修正时自动跳过。
+- `.github/workflows/MTK-AUTO.yml`、`.github/workflows/WRT-BUILD.yml`：
+  `WRT_THEME: aurora` → `vantage`。
+- `index.html`：首页特性标签 `UI: Aurora 极简主题` → `UI: Vantage 主题`。
+
+### 验证
+
+- Settings.sh 主题段在 `vantage` / `aurora` / `argon` 三组取值下实跑：
+  vantage 输出四行（主题 + 仪表盘 + aurora 两项）；aurora 与改动前逐行一致；
+  argon 输出主题 + aurora 两项。
+- 种子脚本以桩 `uci` 复现三种情形（未种子 / 已种子 / 主题未编入），写操作与预期一致。
+- vantage CSS 补丁对本仓库当前上游（v1.0.11）做 dry-run：仅目标 `font:` 一行被替换。
+
 ## [2026-10-30] 修复 homeproxy ucode 模块导出缺失（hasForceProxyRules）
 
 ### 背景

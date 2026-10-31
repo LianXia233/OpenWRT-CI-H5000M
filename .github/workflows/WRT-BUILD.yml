@@ -57,8 +57,8 @@ jobs:
     with:
       # 编译配置
       WRT_CONFIG: ${{ inputs.CONFIG }}
-      # 默认主题
-      WRT_THEME: aurora
+      # 默认主题（vantage；aurora 仍编入固件，可在系统设置里切回）
+      WRT_THEME: vantage
       # 默认主机名
       WRT_NAME: OWRT
       # 默认 WIFI 名称

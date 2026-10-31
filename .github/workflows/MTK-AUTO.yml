@@ -44,7 +44,8 @@ jobs:
     with:
       WRT_CONFIG: ${{ matrix.CONFIG }}
 
-      WRT_THEME: aurora
+      # 默认主题（vantage；aurora 仍编入固件，可在系统设置里切回）
+      WRT_THEME: vantage
       WRT_NAME: OWRT
       WRT_SSID: OWRT
       WRT_WORD: 12345678
