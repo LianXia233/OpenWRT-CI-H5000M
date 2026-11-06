@@ -76,6 +76,10 @@ jobs:
     # 而 immortalwrt 初始化脚本与部分 host 依赖尚未适配，迁移会造成编译中断。
     # 固定到 ubuntu-24.04 保证可复现构建（需更新镜像时只需改这一处）。
     runs-on: ubuntu-24.04
+    # 兜底上限：正常构建约 40 分钟。2026-11-06 事故中 apt 下载退化把 job 拖到 2.5 小时，
+    # 最终 runner 被环境回收、日志也没能上传（job 日志端点返回 404），只能靠猜。
+    # 显式收束可让异常在可观测的时间窗内以失败告终，并保留日志。
+    timeout-minutes: 300
     steps:
       - name: Checkout Projects
         # node24：actions/checkout@v4 仍运行在已弃用的 Node 20 上
@@ -91,7 +95,47 @@ jobs:
             /usr/lib/google-cloud-sdk /opt/hostedtoolcache/CodeQL 2>/dev/null || true
           df -h / /mnt 2>/dev/null || true
 
+      - name: Select Apt Mirror
+        # runner 镜像内置 /etc/apt/apt-mirrors.txt：azure.archive.ubuntu.com(priority:1) →
+        # archive.ubuntu.com(priority:2) → security.ubuntu.com(priority:3)。apt 只按优先级
+        # 取第一个可用镜像，慢但没报错时不会自动降级。2026-11-06 事故就是 azure 镜像吞吐
+        # 骤降到几十 kB/s，上游 init_build_environment.sh 需要下载约 661 MB 依赖，
+        # 步骤被拖到 1.5~2.5 小时直至 runner 失联、日志未上传。
+        # 这里按实测吞吐在两者之间切换；吞吐正常时不改变任何现有配置。
+        timeout-minutes: 5
+        run: |
+          probe() {
+            local url="$1" sp
+            sp=$(curl -sSL -o /dev/null --max-time 15 -w '%{speed_download}' "$url" 2>/dev/null || true)
+            echo "${sp%%.*}"
+          }
+          PKG="dists/noble-updates/main/binary-amd64/Packages.gz"
+          AZ=$(probe "http://azure.archive.ubuntu.com/ubuntu/${PKG}")
+          AR=$(probe "https://archive.ubuntu.com/ubuntu/${PKG}")
+          AZ=${AZ:-0}
+          AR=${AR:-0}
+          echo "apt 镜像实测吞吐（字节/秒）：azure=${AZ} archive=${AR}"
+
+          # 判定：azure 低于 300 kB/s 视为退化，且备用镜像至少快一倍、自身也达到 300 kB/s
+          # 才切换，避免在两边都慢时把配置改坏。
+          if [ "$AZ" -lt 300000 ] && [ "$AR" -ge $((AZ * 2)) ] && [ "$AR" -ge 300000 ]; then
+            echo "azure 镜像吞吐低于阈值，切换为 archive.ubuntu.com 优先"
+            printf '%s\t%s\n' \
+              'https://archive.ubuntu.com/ubuntu/' 'priority:1' \
+              'https://security.ubuntu.com/ubuntu/' 'priority:2' \
+              'http://azure.archive.ubuntu.com/ubuntu/' 'priority:3' \
+              | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            # 兼容未走 mirrorlist 的镜像：sources 里若硬编码 azure 也一并替换
+            sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          else
+            echo "镜像吞吐正常，保持 runner 默认镜像配置"
+          fi
+
       - name: Initialization Environment
+        # 正常 5~6 分钟。上限 60 分钟：今天这种上游退化必须尽快失败并留下日志，
+        # 而不是像以前那样烧掉 1.5~2.5 小时后连日志都取不到。
+        timeout-minutes: 60
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -124,8 +168,9 @@ jobs:
           apt_retry 300 purge firefox
           apt_retry 300 update
           # 主机系统升级不是编译必需项：慢网络下允许更长耗时，失败也不阻塞后续流程，
-          # 只需修复可能被中断的 dpkg 状态即可。
-          if ! apt_retry 1800 full-upgrade; then
+          # 只需修复可能被中断的 dpkg 状态即可。单次上限从 1800s 收到 600s：
+          # 有镜像切换兜底后，3 次重试最多 30 分钟，不再把整步骤的时间预算吃光。
+          if ! apt_retry 600 full-upgrade; then
             echo "系统升级失败或超时，修复 dpkg 状态后继续" >&2
             sudo -E dpkg --configure -a || true
             sudo -E apt -yqq -f install || true
@@ -135,9 +180,11 @@ jobs:
           apt_retry 300 clean
           apt_retry 900 install dos2unix libfuse-dev gettext
           # 官方初始化脚本同样加超时与重试（脚本内部有 apt update 步骤）
+          # 单次上限 900s（正常 5 分钟，3 倍余量）：3 次全部超时也才 45 分钟，
+          # 仍在步骤 60 分钟上限之内，能带着日志失败而不是被环境回收。
           INIT_OK=0
           for i in 1 2 3; do
-            timeout --kill-after=30 1800 sudo bash -c 'bash <(curl -sL --retry 3 --connect-timeout 30 https://build-scripts.immortalwrt.org/init_build_environment.sh)' && { INIT_OK=1; break; }
+            timeout --kill-after=30 900 sudo bash -c 'bash <(curl -sL --retry 3 --connect-timeout 30 https://build-scripts.immortalwrt.org/init_build_environment.sh)' && { INIT_OK=1; break; }
             echo "init_build_environment 第 ${i} 次失败或超时，10 秒后重试" >&2
             sleep 10
           done

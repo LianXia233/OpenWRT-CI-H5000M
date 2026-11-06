@@ -2,6 +2,67 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-06] 修复上游 apt 镜像吞吐退化导致的构建中断
+
+### 背景
+
+2026-11-06 的定时构建（`MTK-AUTO`，run 42142746141）两个 job 全部失败，
+失败点为第 4 步 `Initialization Environment`，GitHub 给出的结论是
+`The hosted runner lost communication with the server`。
+
+取证过程与事实：
+
+1. 失败 job 的日志端点返回 `404 The specified blob does not exist.`
+   （整个运行的日志归档是 22 字节的空 zip），即 runner 在步骤执行中被环境回收，
+   日志从未上传；结论横幅也不在 REST API 的 check-runs `output` 中，由运行页渲染。
+2. 同日三个仓库（`OpenWRT-CI`、`H5000M-CI-Qmodem`、本仓库）的定时编译全部失败，
+   上游模板仓库 `VIKINGYFY/OpenWRT-CI` 同为该结论，短任务 `Auto-Clean` 正常，
+   04:53 之后的其他仓库构建也正常 → 不是 GitHub 全局故障。
+3. 运行镜像未变化（`20261101.360` / runner 2.338.2，与 11-04、11-05 一致），
+   排除镜像回归；11-05 同一步骤耗时 5 分 25 秒（01:12:15→01:17:40），
+   当天却卡了 70–143 分钟。
+4. 取消（cancel）可让 GitHub 上传已产生的部分日志；据此取到同款初始化步骤的实时输出现场：
+
+   ```
+   11:20:28 [INFO] Installing dependencies...
+   11:20:29 Need to get 47.1 MB of archives.
+   11:19:26 Ign:2 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libapt-pkg6.0t64 ...
+   11:28:08 Need to get 661 MB of archives.
+   11:33:10 Ign:9 ... openjdk-21-jre-headless amd64 21.0.12.1+1-1~24.04.4
+   11:38:15 Ign:32 ... texlive-binaries amd64 2023.20230311.66589-9build3
+   11:48:22 Ign:34 ... texlive-fonts-recommended all 2023.20240207-1
+   11:51:02 Ign:36 ... texlive-latex-base all 2023.20240207-1
+   11:58:18 ##[error]The operation was canceled.
+   ```
+
+   30 分钟只下到第 36 个包（共 303 个、661 MB），换算吞吐约 2–4 MB/min，
+   且 apt 反复把失败的包标成 `Ign:` 再重试 → 初始化步骤实际需要数小时。
+
+根因：runner 默认镜像 `azure.archive.ubuntu.com` 当天吞吐骤降。runner 镜像内置的
+`/etc/apt/apt-mirrors.txt` 是 `azure(priority:1) → archive(priority:2) → security(priority:3)`
+的**优先级回退**列表，apt 只在镜像报错时降级，**镜像"慢"不会触发降级**，
+于是上游 `init_build_environment.sh` 的 661 MB 依赖安装被拖到数小时，
+最终 runner 与 GitHub 失联。
+
+### 变更
+
+- `.github/workflows/WRT-CORE.yml`：新增 `Select Apt Mirror` 步骤（5 分钟上限）。
+  实测 `azure` 与 `archive.ubuntu.com` 下载同一索引文件的吞吐，
+  仅当 `azure < 300 kB/s` 且 `archive` 至少快一倍时，把 `/etc/apt/apt-mirrors.txt`
+  改成 `archive(priority:1)`，并对硬编码了 azure 的 sources 做等价替换；
+  吞吐正常的日子不改变任何现有配置。
+- 同文件：`Initialization Environment` 增加 `timeout-minutes: 60`（正常 5~6 分钟），
+  job 增加 `timeout-minutes: 300`。异常时在可观测时间窗内失败并保留日志，
+  不再出现"烧掉 1.5–2.5 小时且日志为空"的不可诊断状态。
+- 同文件：`apt full-upgrade` 单次超时 1800s → 600s、`init_build_environment.sh`
+  单次超时 1800s → 900s（各 3 次重试），把最坏耗时压到步骤上限之内；
+  系统升级本就不是编译必需项，失败仍按原逻辑修复 dpkg 后继续。
+
+### 影响范围
+
+`MTK-AUTO.yml` 与 `WRT-BUILD.yml` 都复用 `WRT-CORE.yml`，两处构建入口均生效。
+`OpenWRT-CI`、`H5000M-CI-Qmodem` 是独立仓库，本次未改动。
+
 ## [2026-10-31] 默认主题切换为 luci-theme-vantage（Aurora 保留为可选）
 
 ### 背景
