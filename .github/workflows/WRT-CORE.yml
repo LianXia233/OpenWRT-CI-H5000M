@@ -104,21 +104,33 @@ jobs:
         # 这里按实测吞吐在两者之间切换；吞吐正常时不改变任何现有配置。
         timeout-minutes: 5
         run: |
+          # 测速必须带真实体积：原来探的是 1.76 MB 的 noble-updates/main/Packages.gz，
+          # 小文件测的是连接建立而不是持续吞吐。本仓库 run 124 的实测输出：
+          #   apt 镜像实测吞吐（字节/秒）：azure=45627172 archive=1045578
+          # 探测把 azure 判成快 44 倍、正确地保留默认；而几分钟后同一个 azure 下
+          # bulk .deb 只有约 50 kB/s（texlive-binaries 8.5 MB 走掉 3 分钟）。
+          # 小文件探测不只是测不出退化，它会主动把慢镜像选进来。
+          # 改用 universe 的 Packages.xz（15.0 MB，apt 自己就要下载），配合 Range
+          # 只取前 8 MB：50 kB/s 时 8 MB 要 160 秒，必然超过 --max-time 而现形。
           probe() {
-            local url="$1" sp
-            sp=$(curl -sSL -o /dev/null --max-time 15 -w '%{speed_download}' "$url" 2>/dev/null || true)
-            echo "${sp%%.*}"
+            local sp
+            sp=$(curl -sSL -r 0-8388607 -o /dev/null --connect-timeout 10 --max-time 25 \
+              -w '%{speed_download}' "$1" 2>/dev/null || true)
+            echo "${sp:-0}" | cut -d. -f1
           }
-          PKG="dists/noble-updates/main/binary-amd64/Packages.gz"
-          AZ=$(probe "http://azure.archive.ubuntu.com/ubuntu/${PKG}")
-          AR=$(probe "https://archive.ubuntu.com/ubuntu/${PKG}")
+          # 代号取自 runner 镜像：runner 升级后若目标 404，两边都测到 0，判定退回
+          # 「保持默认」，属安全降级而非误切换。
+          . /etc/os-release 2>/dev/null || true
+          IDX="dists/${VERSION_CODENAME:-noble}/universe/binary-amd64/Packages.xz"
+          AZ=$(probe "http://azure.archive.ubuntu.com/ubuntu/${IDX}")
+          ALT=$(probe "https://archive.ubuntu.com/ubuntu/${IDX}")
           AZ=${AZ:-0}
-          AR=${AR:-0}
-          echo "apt 镜像实测吞吐（字节/秒）：azure=${AZ} archive=${AR}"
+          ALT=${ALT:-0}
+          echo "apt 批量吞吐实测（字节/秒）：azure=${AZ} archive=${ALT}"
 
           # 判定：azure 低于 300 kB/s 视为退化，且备用镜像至少快一倍、自身也达到 300 kB/s
           # 才切换，避免在两边都慢时把配置改坏。
-          if [ "$AZ" -lt 300000 ] && [ "$AR" -ge $((AZ * 2)) ] && [ "$AR" -ge 300000 ]; then
+          if [ "$AZ" -lt 300000 ] && [ "$ALT" -ge $((AZ * 2)) ] && [ "$ALT" -ge 300000 ]; then
             echo "azure 镜像吞吐低于阈值，切换为 archive.ubuntu.com 优先"
             printf '%s\t%s\n' \
               'https://archive.ubuntu.com/ubuntu/' 'priority:1' \
@@ -127,7 +139,9 @@ jobs:
               | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
             # 兼容未走 mirrorlist 的镜像：sources 里若硬编码 azure 也一并替换
             sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
-              /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            # 换了源必须重新取索引，否则本步骤之后的 apt 仍按旧镜像的索引解析依赖
+            sudo -E apt -yqq update
           else
             echo "镜像吞吐正常，保持 runner 默认镜像配置"
           fi
@@ -153,14 +167,23 @@ jobs:
           # 用法：apt_retry <超时秒数> <apt 子命令及参数...>
           # 不同命令耗时差异很大（full-upgrade 在 runner 镜像更新后可能要下载数百 MB），
           # 统一 300 秒会把正常的慢速下载误杀，故超时时间改为按命令传入。
+          #
+          # 关键：`timeout` 必须是 `sudo` 的子进程（sudo 在前），不能写成
+          # `timeout ... sudo apt`。后者超时时只把信号发给 sudo 所在的进程组，
+          # sudo 被 SIGKILL 后无法再转发信号，它拉起的 apt 会成孤儿继续跑并持有
+          # /var/lib/dpkg/lock-frontend —— 于是后续每一次重试都卡在锁上，
+          # 2026-11-06 的 MT5700M job 就是这样连续 3 轮、空烧 30 分钟后 exit 1。
+          # sudo 在前时 timeout 与 apt 同组，SIGTERM/SIGKILL 直接命中 apt。
           apt_retry() {
             local tmo="$1"; shift
             local i
             for i in 1 2 3; do
-              timeout --kill-after=30 "$tmo" sudo -E apt -yqq \
+              sudo -E timeout --kill-after=30 "$tmo" apt -yqq \
                 -o Dpkg::Options::=--force-confdef \
                 -o Dpkg::Options::=--force-confold "$@" && return 0
-              echo "apt $* 第 ${i} 次失败或超时（${tmo}s），10 秒后重试" >&2
+              echo "apt $* 第 ${i} 次失败或超时（${tmo}s）" >&2
+              # 留下持锁者，下次再出问题时不必猜是谁卡住了 dpkg
+              pgrep -a apt || true
               sleep 10
             done
             return 1
@@ -179,13 +202,33 @@ jobs:
           apt_retry 300 autoclean
           apt_retry 300 clean
           apt_retry 900 install dos2unix libfuse-dev gettext
-          # 官方初始化脚本同样加超时与重试（脚本内部有 apt update 步骤）
+          # 官方初始化脚本同样加超时与重试（脚本内部有 apt update 步骤）。
           # 单次上限 900s（正常 5 分钟，3 倍余量）：3 次全部超时也才 45 分钟，
           # 仍在步骤 60 分钟上限之内，能带着日志失败而不是被环境回收。
+          #
+          # 先落盘再执行，不再用 `bash <(curl ...)`：curl 卡住或证书失败时，进程
+          # 替换喂给 bash 的是空内容，bash 会以 0 退出，这一步反而「成功」，
+          # 缺依赖要到几小时后的编译阶段才暴露。落盘后能校验字节数并对下载本身设超时。
           INIT_OK=0
           for i in 1 2 3; do
-            timeout --kill-after=30 900 sudo bash -c 'bash <(curl -sL --retry 3 --connect-timeout 30 https://build-scripts.immortalwrt.org/init_build_environment.sh)' && { INIT_OK=1; break; }
-            echo "init_build_environment 第 ${i} 次失败或超时，10 秒后重试" >&2
+            if [ ! -s /tmp/init_build_environment.sh ]; then
+              if ! curl -fsSL --retry 3 --connect-timeout 30 --max-time 120 \
+                -o /tmp/init_build_environment.sh \
+                https://build-scripts.immortalwrt.org/init_build_environment.sh; then
+                echo "init_build_environment.sh 下载失败（第 ${i} 次）" >&2
+                rm -f /tmp/init_build_environment.sh
+                sleep 10
+                continue
+              fi
+              wc -c /tmp/init_build_environment.sh
+            fi
+            # sudo 在前，让 timeout 与脚本拉起的 apt 同属一个进程组（原因见 apt_retry 注释）
+            if sudo -E timeout --kill-after=30 900 bash /tmp/init_build_environment.sh; then
+              INIT_OK=1
+              break
+            fi
+            echo "init_build_environment 第 ${i} 次失败或超时" >&2
+            pgrep -a apt || true
             sleep 10
           done
           if [ "$INIT_OK" != "1" ]; then
