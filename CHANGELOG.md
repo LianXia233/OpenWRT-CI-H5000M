@@ -2,6 +2,60 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-06] 修复有界重试自身的孤儿 apt 死锁，并把镜像测速换成真实批量负载
+
+### 背景
+
+上一笔「上游 apt 镜像吞吐退化时自动切换」（PR #3，`96defd4`）合入后，当天
+12:26 UTC 的 `MTK-AUTO`（run 124）仍失败，且两个 job 各自暴露了新问题：
+
+**1. `Select Apt Mirror` 的测速目标选错了，而且方向是反的。** run 124 日志里它打印：
+
+```
+apt 镜像实测吞吐（字节/秒）：azure=45627172 archive=1045578
+```
+
+探测对象是 1.76 MB 的 `noble-updates/main/Packages.gz`。这么小的文件测的是连接建立，
+不是持续吞吐 —— 结果它把已经退化的 azure 判成快 44 倍，于是「正确地」保留了默认镜像；
+而几分钟以后，同一个 azure 下 bulk `.deb` 的实测速率只有约 50 kB/s
+（`texlive-binaries` 8.5 MB 走掉 3 分钟）。小文件测速不只是测不出退化，它会主动把
+慢镜像选进来。
+
+**2. `apt_retry` 自己造出了 dpkg 死锁。** `MT5700M` job 的日志形态：
+
+```
+E: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is another process using it?
+Waiting for cache lock: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 10001 (apt)...
+```
+
+从 12:54 起连续 3 轮、约 17 次等待，13:23 才 exit 1，空烧近一小时。根因是
+`timeout --kill-after=30 "$tmo" sudo -E apt ...` 这个顺序：`timeout` 是 `sudo` 的父进程，
+超时信号发给 `sudo` 所在的进程组；`sudo` 收到 SIGKILL 后已经没机会再向子进程转发信号，
+它拉起的 `apt` 于是成孤儿继续跑、继续持有 `lock-frontend`。此后每一次重试都必然卡在锁上
+—— 重试机制本身让失败从「慢」变成了「死锁」。`init_build_environment` 的三轮重试同理。
+
+**3. init 脚本仍走 `bash <(curl ...)`。** curl 卡住或失败时，进程替换喂给 bash 的是空内容，
+bash 以 0 退出，这一步反而「成功」，缺依赖要到几小时后的编译阶段才暴露。
+
+### 变更
+
+- **`Select Apt Mirror` 换测速目标**：改用 `universe/binary-amd64/Packages.xz`
+  （15.0 MB，apt 自身要下载，路径各版本都在），配合 `Range` 只取前 8 MB，比的是持续
+  吞吐。50 kB/s 时 8 MB 需约 160 秒，必然顶到 `--max-time 25` 而现形；azure 正常时
+  8 MB 不到 1 秒，判定保持默认。代号取自 `/etc/os-release`，runner 换版后若目标 404，
+  两边都测到 0，退回「保持默认」，属安全降级而非误切换。
+- **切换镜像后补一次 `apt -yqq update`**：否则后续 apt 仍按旧镜像取回的索引解析依赖。
+- **`apt_retry` 与 init 重试都改为 `sudo` 在前、`timeout` 在后**：这样 `timeout` 与
+  它拉起的 `apt` 同属一个进程组，SIGTERM/SIGKILL 能真正命中 `apt`，不再留下持锁孤儿。
+  失败路径上加 `pgrep -a apt`，下次再出问题能直接看到持锁者而不必反推。
+- **init 脚本先落盘再执行**：`curl -fsSL --retry 3 --connect-timeout 30 --max-time 120`
+  下载后 `wc -c` 校验非空，再由 `sudo -E timeout --kill-after=30 900` 执行；
+  已下载成功时后续重试不重复取脚本。
+- **`99marvis-timeouts` 保持不变**：`DPkg::Lock::Timeout "120"` 本来就是对的，
+  问题出在持锁者根本不该被自己造出来。
+
+未删步骤、未放宽校验、未改编译参数与缓存键。
+
 ## [2026-11-06] 修复上游 apt 镜像吞吐退化导致的构建中断
 
 ### 背景
