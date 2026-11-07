@@ -663,11 +663,17 @@ jobs:
 
           echo "==> 准备 Rust 工具链"
           if ! command -v cargo >/dev/null 2>&1; then
-            # 兜底：runner 镜像不再预装 Rust 时按需安装（minimal profile 即可）
-            curl -sSf --retry 3 https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            # 兜底：runner 镜像不再预装 Rust 时按需安装（minimal profile 即可）。
+            # 与 init 脚本同款套路：先落盘再执行 —— curl 管道喂 sh 时，curl 挂死
+            # 或失败会让 sh 读到空内容并以 0 退出，缺工具链要到几小时后才暴露。
+            curl -sSf --retry 3 --connect-timeout 30 --max-time 120 \
+              https://sh.rustup.rs -o /tmp/rustup-init.sh
+            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable
             . "$HOME/.cargo/env"
           fi
-          rustup target add "$RUST_TARGET"
+          # target 标准库约 200MB，rustup 无内置下载超时；慢速挂起时收束并重试一次
+          timeout --kill-after=30 900 rustup target add "$RUST_TARGET" \
+            || timeout --kill-after=30 900 rustup target add "$RUST_TARGET"
           cargo --version
           rustc --version
 
@@ -675,10 +681,15 @@ jobs:
           # 上游 CI 的 rust 作业：零依赖 crate，宿主跑全量单测与回归只需一两分钟；
           # 控制器是安全关键组件（PWM / 内核热保护交互），交叉编译前先过测试。
           cd package/luci-app-h5000m-fancontrol/src
-          cargo test --locked --release
+          # 零依赖 crate，网络风险仅 crates.io 索引，timeout 收束即可，无需重试
+          timeout --kill-after=30 900 cargo test --locked --release
 
           echo "==> 交叉编译 h5000m-fancontrol（两套固件共用）"
-          CARGO_TARGET_DIR=/tmp/h5fan-target \
+          # 首次构建需下载 musl std 与解析索引，慢速挂起时收束并重试一次
+          #（中断只影响未完成的编译单元，重跑从缓存续建）
+          CARGO_TARGET_DIR=/tmp/h5fan-target timeout --kill-after=60 1200 \
+            cargo build --release --locked --target "$RUST_TARGET" \
+            || CARGO_TARGET_DIR=/tmp/h5fan-target timeout --kill-after=60 1200 \
             cargo build --release --locked --target "$RUST_TARGET"
 
           echo "==> 产物自检"
@@ -710,7 +721,8 @@ jobs:
           # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
           # 两条下载链路都在 CI 上偶发卡住；venv 隔离，不污染 runner 的 Python 环境。
           python3 -m venv /tmp/zig-venv
-          /tmp/zig-venv/bin/pip install --quiet "ziglang==0.13.0"
+          # PyPI 链路也可能慢速挂起：pip 自带超时与重试，收束单次下载
+          /tmp/zig-venv/bin/pip install --quiet --timeout 60 --retries 3 "ziglang==0.13.0"
           ZIG="$(/tmp/zig-venv/bin/python -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
           chmod +x "$ZIG"
           "$ZIG" version
@@ -751,8 +763,11 @@ jobs:
           export CC_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-cc
           export AR_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-ar
           export RUSTFLAGS="-C link-self-contained=no"
-          # --locked：Cargo.lock 由上游固定，避免 CI 上解析出与发布产物不同的依赖树
-          CARGO_TARGET_DIR=/tmp/mt5700-target \
+          # --locked：Cargo.lock 由上游固定，避免 CI 上解析出与发布产物不同的依赖树。
+          # Tokio + rustls + ring 依赖树的下载与 zig 链接最重，挂起时收束并重试一次
+          CARGO_TARGET_DIR=/tmp/mt5700-target timeout --kill-after=60 1800 \
+            cargo build --release --locked --target "$RUST_TARGET" \
+            || CARGO_TARGET_DIR=/tmp/mt5700-target timeout --kill-after=60 1800 \
             cargo build --release --locked --target "$RUST_TARGET"
 
           echo "==> 产物自检"
@@ -782,14 +797,27 @@ jobs:
         run: |
           cd ./wrt/
 
-          make download -j$(nproc)
+          # 2026-11-07 事故：源码包镜像「连上但吞吐趋零」，本步拖了 77 分钟
+          # （正常 ~2 分钟）直至 runner 被环境回收、日志未上传。download.pl 的
+          # 镜像轮换只在连接失败时触发，慢速挂起必须用 timeout 强制收束
+          # （timeout 自建进程组，信号能命中 make 拉起的全部下载子进程）。
+          # 源码包先落 tmp/dl、校验哈希通过才进 dl/，中断不留损坏文件，
+          # 降级重试只补缺失部分，失败即快速报错并保留日志。
+          if ! timeout --kill-after=60 900 make download -j$(nproc); then
+            echo "==> 并发下载超时或失败，降级 -j1 逐文件重试（轮换镜像源）"
+            timeout --kill-after=60 1800 make download -j1 V=s
+          fi
 
       - name: Compile Firmware
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
 
-          make -j$(nproc) || make -j1 V=s
+          # 编译期偶有按需补下载源码包，与 Download Packages 同样的挂起风险，
+          # 首轮 -j$(nproc) 用 timeout 收束（基准 ~35 分钟），失败降级 -j1 V=s
+          # 从断点续编并打印详细日志。
+          timeout --kill-after=60 5400 make -j$(nproc) \
+            || timeout --kill-after=60 7200 make -j1 V=s
 
       - name: Machine Information
         run: |
