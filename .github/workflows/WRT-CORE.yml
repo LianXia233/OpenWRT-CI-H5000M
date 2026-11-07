@@ -330,6 +330,18 @@ jobs:
           $GITHUB_WORKSPACE/Scripts/Packages.sh
           $GITHUB_WORKSPACE/Scripts/Handles.sh
 
+      - name: Import Online Upgrade Package
+        # 两套固件都装 luci-app-online-upgrade（升级源按机型在 Custom Settings
+        # 里生成，见 Scripts/OnlineUpgradePreset.sh），故本步不按 WRT_MODEM 跳过。
+        # 上游是「包即仓库根」形态，且 Build/Prepare、Build/Compile 均为空：
+        # 二进制必须由后面的 Cross Compile Online Upgrade Backend 预编译后落到
+        # package/luci-app-online-upgrade/root/usr/bin/online-upgrade，否则会装出空壳。
+        # 本脚本同时做 CRLF 归一、结构断言与 90-online-upgrade-auto 守卫路径核对。
+        run: |
+          cd ./wrt/package/
+
+          $GITHUB_WORKSPACE/Scripts/Packages-OnlineUpgrade.sh
+
       - name: Smoke Test luci-app-mt5700
         # 仅当 WRT_MODEM=MT5700（新插件）时执行；选旧插件时由下一步的
         # luci-app-mt5700m 测试负责。
@@ -619,31 +631,67 @@ jobs:
           echo "模组插件已启用：$WRT_MODEM（$MODEM_VER）"
           echo "MT5700_PLUGIN_VERSION=${MODEM_VER}（$WRT_MODEM）" >> "$GITHUB_ENV"
 
+          # 在线升级插件及其运行期依赖：两套固件都要装。依赖由包的 DEPENDS 声明
+          # （+rpcd-mod-ucode +ucode-mod-fs +ucode-mod-uci），defconfig 应自动拉齐；
+          # 若当前 feeds 缺其中任一包，表现为「主包 =y 但运行期 rpcd 加载失败」，
+          # 故在耗时编译前以最终 .config 为准失败。
+          for SYM in CONFIG_PACKAGE_luci-app-online-upgrade \
+                     CONFIG_PACKAGE_rpcd-mod-ucode \
+                     CONFIG_PACKAGE_ucode-mod-fs \
+                     CONFIG_PACKAGE_ucode-mod-uci; do
+            if ! grep -q "^${SYM}=y$" .config; then
+              echo "::error::defconfig 未启用 ${SYM}：在线升级插件或其运行期依赖缺失"
+              exit 1
+            fi
+          done
+          echo "在线升级插件已启用：$(grep -m1 '^CONFIG_PACKAGE_luci-app-online-upgrade=' .config)"
+
           make clean -j$(nproc)
 
-      - name: Cross Compile Rust Backends
-        # 两个 Rust 后端，均只随 MT5700 固件（新插件）编译：
-        # luci-app-h5000m-fancontrol v3.x 的风扇控制器与 luci-app-mt5700 的
-        # at-webserver。MT5700M 固件用旧模组插件（原生 C 传输程序）+ FAN789 原版
-        # 风扇插件（纯 shell），全程无需 Rust，本步整体跳过。
-        # buildroot 编译阶段的 PATH 只有交叉工具链（rules.mk 里
-        # export PATH:=$(TARGET_PATH)），没有 cargo/rustc；引入
-        # feeds/packages/lang/rust 又需现场编译 LLVM（1~2 小时、约 20GB 磁盘），
-        # 不适合 CI。故这里用 rustup 交叉编译出与固件架构一致的静态 musl 二进制，
-        # 由 Scripts/Packages.sh 注入的 *_PREBUILT_HOOK 直接装包；万一产物缺失，
-        # 上游 src/Makefile 仍会回退到 cargo build。
-        #
-        # 风扇控制器：零依赖 crate，.cargo/config.toml 已固定 rust-lld，musl 目标
-        # 自包含静态链接，不需要 zig 或交叉 gcc。
-        # at-webserver：Tokio + rustls 依赖树含 ring（C 代码），链接器用 zig
-        # （与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target 不自带
-        # libc 与启动对象，zig cc 一次提供 libc 与 C 编译器，免装目标板交叉工具链。
-        if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
+      - name: Rust Cache Key
+        # 缓存键只依赖在线升级插件的 Cargo.lock：它的依赖树（Tokio + rustls +
+        # ring）是本仓库最重的 Rust 构建，registry 与 target 命中后重复构建
+        # 不再全量重编译。两套固件的该包源码与目标三元组完全相同，故键里不带
+        # WRT_MODEM，两个作业可共用同一份缓存（并行时先完成者写入）。
+        if: env.WRT_TEST != 'true'
+        run: |
+          cd ./wrt/
+          LOCK=package/luci-app-online-upgrade/rust/Cargo.lock
+          if [ ! -f "$LOCK" ]; then
+            echo "::error::$LOCK 不存在（Import Online Upgrade Package 未成功？），无法计算 Rust 缓存键"
+            exit 1
+          fi
+          echo "RUST_LOCK_HASH=$(sha256sum "$LOCK" | cut -c1-24)" >> "$GITHUB_ENV"
+
+      - name: Rust Build Cache
+        # 等价于 Swatinem/rust-cache 的最小实现：缓存 cargo registry/git 索引与
+        # 在线升级后端的 target 目录。target 命中后「未改 Cargo.lock、只改业务
+        # 代码」的重复构建只重编 crate 自身，不再整棵依赖树重来。
+        if: env.WRT_TEST != 'true'
+        id: rust-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            /tmp/rust-target-online-upgrade
+          key: rust-online-upgrade-${{ env.RUST_LOCK_HASH }}
+          restore-keys: |
+            rust-online-upgrade-
+
+      - name: Prepare Rust Toolchain
+        # 统一准备 Rust 官方工具链与 zig 交叉链接器，供下面两个编译步骤复用。
+        # 用 rustup stable + <triple> std，不使用 feeds/packages/lang/rust：
+        # OpenWrt 侧 Rust 要现场编译 host LLVM（1~2 小时、约 20GB 磁盘），且产物
+        # 链接目标板的 musl 动态库，与本仓库既有的静态 musl 二进制策略不一致
+        # （panic 策略、strip 与符号处理也不同）。取舍见 README「Rust 后端编译」。
+        # 在线升级插件两套固件都装，故本步不受 WRT_MODEM 限制。
+        if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
 
           # 预编译产物必须与固件架构一致：架构不符时包能装上、运行时才报
-          # Exec format error，故在编译前硬性校验（本固件目标为 MT7981/Filogic）。
+          # Exec format error，故在编译前硬性校验（本固件目标为 Filogic aarch64）。
           ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\(.*\)"/\1/p' .config | head -1)
           if [ -z "$ARCH_PACKAGES" ]; then
             echo "::error::.config 未解析出 CONFIG_TARGET_ARCH_PACKAGES，无法确定 Rust 目标架构"
@@ -659,6 +707,8 @@ jobs:
               exit 1
               ;;
           esac
+          echo "RUST_TARGET=$RUST_TARGET" >> "$GITHUB_ENV"
+          echo "ZIG_TARGET=$ZIG_TARGET" >> "$GITHUB_ENV"
           echo "Rust 目标：$RUST_TARGET（ARCH_PACKAGES=$ARCH_PACKAGES）"
 
           echo "==> 准备 Rust 工具链"
@@ -669,13 +719,69 @@ jobs:
             curl -sSf --retry 3 --connect-timeout 30 --max-time 120 \
               https://sh.rustup.rs -o /tmp/rustup-init.sh
             sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable
-            . "$HOME/.cargo/env"
+            echo "$HOME/.cargo/bin" >> "$GITHUB_ENV"
+            export PATH="$HOME/.cargo/bin:$PATH"
           fi
           # target 标准库约 200MB，rustup 无内置下载超时；慢速挂起时收束并重试一次
           timeout --kill-after=30 900 rustup target add "$RUST_TARGET" \
             || timeout --kill-after=30 900 rustup target add "$RUST_TARGET"
           cargo --version
           rustc --version
+
+          echo "==> 准备 zig 交叉链接器"
+          # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
+          # 两条下载链路都在 CI 上偶发卡住；venv 隔离，不污染 runner 的 Python 环境。
+          python3 -m venv /tmp/zig-venv
+          # PyPI 链路也可能慢速挂起：pip 自带超时与重试，收束单次下载
+          /tmp/zig-venv/bin/pip install --quiet --timeout 60 --retries 3 "ziglang==0.13.0"
+          ZIG="$(/tmp/zig-venv/bin/python -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
+          chmod +x "$ZIG"
+          "$ZIG" version
+          echo "ZIG=$ZIG" >> "$GITHUB_ENV"
+
+          # cc-rs / cargo 会把 --target= 原样传给被包装的编译器，而 zig 只接受自己的
+          # target query；包装脚本统一丢弃外部 --target=、过滤 lld 不认的
+          # --fix-cortex-a53-843419，再显式指定 zig target。
+          mkdir -p /tmp/zig-wrap
+          cat > /tmp/zig-wrap/zig-cc <<'WRAP'
+          #!/usr/bin/env bash
+          args=()
+          for a in "$@"; do
+          	case "$a" in
+          		--target=*|*--fix-cortex-a53*) ;;
+          		*) args+=("$a") ;;
+          	esac
+          done
+          exec "$ZIG" cc -target "$ZIG_TARGET" "${args[@]}"
+          WRAP
+          cat > /tmp/zig-wrap/zig-ar <<'WRAP'
+          #!/usr/bin/env bash
+          args=()
+          for a in "$@"; do
+          	case "$a" in
+          		--target=*) ;;
+          		*) args+=("$a") ;;
+          	esac
+          done
+          exec "$ZIG" ar "${args[@]}"
+          WRAP
+          chmod +x /tmp/zig-wrap/zig-cc /tmp/zig-wrap/zig-ar
+
+      - name: Cross Compile Rust Backends
+        # 两个 Rust 后端，均只随 MT5700 固件（新插件）编译：
+        # luci-app-h5000m-fancontrol v3.x 的风扇控制器与 luci-app-mt5700 的
+        # at-webserver。MT5700M 固件用旧模组插件（原生 C 传输程序）+ FAN789 原版
+        # 风扇插件（纯 shell），无需 Rust，本步整体跳过。
+        # 工具链与 zig 包装已由 Prepare Rust Toolchain 就绪（RUST_TARGET / ZIG 在 env）。
+        #
+        # 风扇控制器：零依赖 crate，.cargo/config.toml 已固定 rust-lld，musl 目标
+        # 自包含静态链接，不需要 zig 或交叉 gcc。
+        # at-webserver：Tokio + rustls 依赖树含 ring（C 代码），链接器用 zig
+        # （与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target 不自带
+        # libc 与启动对象，zig cc 一次提供 libc 与 C 编译器，免装目标板交叉工具链。
+        if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
+        run: |
+          cd ./wrt/
 
           echo "==> 风扇控制器上游测试（宿主构建）"
           # 上游 CI 的 rust 作业：零依赖 crate，宿主跑全量单测与回归只需一两分钟；
@@ -717,45 +823,6 @@ jobs:
           echo "luci-app-h5000m-fancontrol 预编译控制器就绪：$FAN_SIZE 字节"
           cd "$GITHUB_WORKSPACE/wrt"
 
-          echo "==> 准备 zig 交叉链接器"
-          # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
-          # 两条下载链路都在 CI 上偶发卡住；venv 隔离，不污染 runner 的 Python 环境。
-          python3 -m venv /tmp/zig-venv
-          # PyPI 链路也可能慢速挂起：pip 自带超时与重试，收束单次下载
-          /tmp/zig-venv/bin/pip install --quiet --timeout 60 --retries 3 "ziglang==0.13.0"
-          ZIG="$(/tmp/zig-venv/bin/python -c 'import os, ziglang; print(os.path.join(os.path.dirname(ziglang.__file__), "zig"))')"
-          chmod +x "$ZIG"
-          "$ZIG" version
-
-          # cc-rs / cargo 会把 --target= 原样传给被包装的编译器，而 zig 只接受自己的
-          # target query；包装脚本统一丢弃外部 --target=、过滤 lld 不认的
-          # --fix-cortex-a53-843419，再显式指定 zig target。
-          export ZIG ZIG_TARGET
-          mkdir -p /tmp/zig-wrap
-          cat > /tmp/zig-wrap/zig-cc <<'WRAP'
-          #!/usr/bin/env bash
-          args=()
-          for a in "$@"; do
-          	case "$a" in
-          		--target=*|*--fix-cortex-a53*) ;;
-          		*) args+=("$a") ;;
-          	esac
-          done
-          exec "$ZIG" cc -target "$ZIG_TARGET" "${args[@]}"
-          WRAP
-          cat > /tmp/zig-wrap/zig-ar <<'WRAP'
-          #!/usr/bin/env bash
-          args=()
-          for a in "$@"; do
-          	case "$a" in
-          		--target=*) ;;
-          		*) args+=("$a") ;;
-          	esac
-          done
-          exec "$ZIG" ar "${args[@]}"
-          WRAP
-          chmod +x /tmp/zig-wrap/zig-cc /tmp/zig-wrap/zig-ar
-
           echo "==> 交叉编译 at-webserver"
           cd package/luci-app-mt5700/src/rust
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/tmp/zig-wrap/zig-cc
@@ -791,6 +858,65 @@ jobs:
           chmod 0755 ../prebuilt/at-webserver
           ls -l ../prebuilt/
           echo "luci-app-mt5700 预编译后端就绪：$BIN_SIZE 字节"
+
+      - name: Cross Compile Online Upgrade Backend
+        # luci-app-online-upgrade 上游 Build/Prepare 与 Build/Compile 均为空，
+        # buildroot 不会为它编译 Rust；二进制必须在这里预编译后落到包内安装路径
+        # package/luci-app-online-upgrade/root/usr/bin/online-upgrade
+        # （Makefile 的 INSTALL_BIN 来源），否则会装出没有后端的空壳。
+        # 两套固件都装该插件，故本步不按 WRT_MODEM 跳过。
+        #
+        # 工具链是 Rust 官方 stable（非 OpenWrt SDK rust），交叉链接由 zig cc
+        # 提供 musl libc 与启动对象（该依赖树含 ring 的 C 代码）。
+        # -C target-cpu=cortex-a53 与固件 ARCH_PACKAGES=aarch64_cortex-a53 对齐
+        # （OpenWrt 官方软件包同样以 cortex-a53 为基线）；不使用 native：runner 是
+        # x86_64，native 会把宿主机指令集编进 aarch64 产物，跨架构直接不可用。
+        if: env.WRT_TEST != 'true'
+        env:
+          RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+        run: |
+          cd ./wrt/package/luci-app-online-upgrade/rust
+
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=/tmp/zig-wrap/zig-cc
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_AR=/tmp/zig-wrap/zig-ar
+          export CC_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-cc
+          export AR_aarch64_unknown_linux_musl=/tmp/zig-wrap/zig-ar
+          export RUSTFLAGS="-C link-self-contained=no -C target-cpu=cortex-a53"
+
+          echo "==> 交叉编译 online-upgrade（target=$RUST_TARGET，缓存命中=${RUST_CACHE_HIT:-false}）"
+          # --locked：Cargo.lock 由上游固定，避免 CI 解析出与发布产物不同的依赖树。
+          # strip 由上游 [profile.release] strip=true 在链接后执行，这里不再二次处理。
+          START=$(date +%s)
+          CARGO_TARGET_DIR=/tmp/rust-target-online-upgrade timeout --kill-after=60 1800 \
+            cargo build --release --locked --target "$RUST_TARGET" \
+            || CARGO_TARGET_DIR=/tmp/rust-target-online-upgrade timeout --kill-after=60 1800 \
+            cargo build --release --locked --target "$RUST_TARGET"
+          END=$(date +%s)
+          echo "在线升级后端交叉编译用时：$((END - START)) 秒（缓存命中=${RUST_CACHE_HIT:-false}）"
+
+          echo "==> 产物自检"
+          BIN="/tmp/rust-target-online-upgrade/$RUST_TARGET/release/online-upgrade"
+          file "$BIN"
+          file "$BIN" | grep -q 'ARM aarch64' || { echo "::error::online-upgrade 不是 aarch64 ELF"; exit 1; }
+          file "$BIN" | grep -q 'statically linked' || { echo "::error::online-upgrade 不是静态链接"; exit 1; }
+          readelf -d "$BIN" | grep -q 'no dynamic section' || {
+            echo "::error::online-upgrade 带动态段，固件缺少对应 musl 动态库时无法启动"
+            readelf -d "$BIN"
+            exit 1
+          }
+          BIN_SIZE=$(stat -c %s "$BIN")
+          # Tokio + rustls + ring 依赖树，opt-level=z + lto + strip 后仍应有兆级体积；
+          # 闸门只拦「产物被截断 / 构建未完成」。
+          if [ "$BIN_SIZE" -lt 500000 ]; then
+            echo "::error::online-upgrade 体积异常（$BIN_SIZE 字节），疑似构建未完成"
+            exit 1
+          fi
+
+          mkdir -p ../root/usr/bin
+          cp -f "$BIN" ../root/usr/bin/online-upgrade
+          chmod 0755 ../root/usr/bin/online-upgrade
+          ls -l ../root/usr/bin/
+          echo "luci-app-online-upgrade 预编译后端就绪：$BIN_SIZE 字节"
 
       - name: Download Packages
         if: env.WRT_TEST != 'true'

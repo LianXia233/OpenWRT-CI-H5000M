@@ -116,6 +116,39 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 
 ---
 
+## 五、 在线升级插件与机型预设
+
+两套固件都内置 [luci-app-online-upgrade](https://github.com/LianXia233/luci-app-online-upgrade)（Rust 后端 + ucode rpcd + LuCI 前端），并在构建期完成以下三件事：
+
+| 阶段 | 入口脚本 | 作用 |
+|:---|:---|:---|
+| 导入 | `Scripts/Packages-OnlineUpgrade.sh` | 上游是「包即仓库根」，clone 到 `package/` 后清 `.git`/`.github`，CRLF 归一为 LF 并按字节复核；断言 `feeds/luci/luci.mk`、`./root/usr/bin/online-upgrade` 安装项、Rust 工程目录、默认 UCI 配置与 release profile 收敛项；核对 `90-online-upgrade-auto` 的存在性守卫与三处路径一致（`root/usr/bin/online-upgrade` → `$(1)/usr/bin/online-upgrade` → 设备端 `/usr/bin/online-upgrade`） |
+| 选中 | `Scripts/Settings.sh` | 追加 `CONFIG_PACKAGE_luci-app-online-upgrade=y`；`rpcd-mod-ucode` / `ucode-mod-fs` / `ucode-mod-uci` 由包 `DEPENDS` 自动拉取，`make defconfig` 之后硬性校验四者均为 `y` |
+| 预设 | `Scripts/OnlineUpgradePreset.sh` | 按机型生成 `files/etc/config/online-upgrade`（overlay 覆盖包自带 conffile） |
+| 预编译 | `WRT-CORE` 的 `Cross Compile Online Upgrade Backend` | 上游 `Build/Prepare` 与 `Build/Compile` 均为空，二进制在此编译后落到包内 `root/usr/bin/online-upgrade`，否则会装出空壳 |
+
+各机型的出厂预设与本仓库实际产物一一对应（构建期由变量推导，不写死静态文件）：
+
+| 机型 | `repo` | `tag` | `firmware_pattern` |
+|:---|:---|:---|:---|
+| `MT5700` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700-` | `^mediatek-filogic-hiveton_h5000m-.*-MT5700-.*\.bin$` |
+| `MT5700M` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700M-` | `^mediatek-filogic-hiveton_h5000m-.*-MT5700M-.*\.bin$` |
+
+- `90-online-upgrade-auto` 的存在性守卫：上游 `98a966a`（2026-11-08）已改为 `[ -x /usr/bin/online-upgrade ]`，不再引用 v1 的 `online-upgrade.sh`。本仓库按内容判定——仅当检测到 v1 路径时才改写，上游已修复则跳过；无论是否改写都断言最终代码行引用 v2 路径（注释中的历史说明不计入判定），并核对三处路径一致。
+- `tag` 的 `latest@<正则>` 语义取自 `rust/src/github.rs`：只在 tag 名匹配该正则的 Release 里取最新，因此 `MT5700` 不会拿到 `MT5700M` 的产物；模组标识两侧都带连字符，`-MT5700-` 不会匹配 `-MT5700M-`（反向同理）。
+- `firmware_pattern` 结尾锚定 `.bin`，排除同批上传的 `.manifest` 与 `Config-*.txt`。
+- 预设只写入代码真正读取的键：`repo`、`tag`、`proxy`、`firmware_pattern`、`min_size_mb`、`expected_sha256`、`dl_workers`、`dl_chunk_mb`、`dl_stall_sec`、`dl_retries`（section 为 `online-upgrade.settings`）。上游默认配置里的 `enabled` 与 `keep_config` 在本版本 Rust 与 rpcd 代码中均未被读取，故不写入，避免"配了却不起作用"。
+
+### Rust 后端编译方式
+
+- 使用 **Rust 官方工具链**（rustup stable + `aarch64-unknown-linux-musl` std），不使用 `feeds/packages/lang/rust`：后者需现场编译 host LLVM（1~2 小时、约 20GB 磁盘），其产物链接目标板的 musl 动态库，与本仓库既有的静态 musl 二进制策略及 panic/strip 处理不一致。
+- 交叉链接器用 zig cc（本仓库既有方案，与上游 `scripts/sdk-build.sh` 一致）：Rust 的 musl target 不自带 libc 与启动对象，zig cc 一次提供 libc 与 C 编译器；该依赖树含 `ring` 的 C 代码。
+- `-C target-cpu=cortex-a53` 与固件 `ARCH_PACKAGES=aarch64_cortex-a53` 对齐；不使用 `target-cpu=native` —— runner 是 x86_64，native 会把宿主机指令集编进 aarch64 产物，跨架构不可用。
+- 产物收敛由上游 `[profile.release]` 保证（`opt-level="z"`、`lto=true`、`codegen-units=1`、`panic="abort"`、`strip=true`），导入脚本对这些键做断言，避免上游改动导致体积与符号策略漂移。
+- 缓存 `~/.cargo/registry`、`~/.cargo/git` 与后端 `target` 目录，键含 `Cargo.lock` 的 sha256；重复构建不再全量重编译依赖树。
+
+---
+
 ## 📂 项目结构一览
 
 ```text
@@ -133,6 +166,8 @@ OpenWRT-CI-H5000M/
 │   └── MT5700M.txt           # 方案 B 插件清单：luci-app-mt5700m + 原版风扇温控
 ├── Scripts/
 │   ├── Packages.sh           # 第三方源码 Feed 同步与条件克隆
+│   ├── Packages-OnlineUpgrade.sh  # 在线升级插件导入与结构/守卫断言
+│   ├── OnlineUpgradePreset.sh     # 按机型生成 files/etc/config/online-upgrade
 │   ├── Handles.sh            # 组件依赖适配与补丁注入
 │   └── Settings.sh           # 默认出厂 IP、Wi-Fi 与时区编译期配置
 ├── index.html                # 固件发布聚合展示落地页

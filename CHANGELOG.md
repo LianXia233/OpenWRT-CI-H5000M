@@ -2,6 +2,84 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-08] 接入 luci-app-online-upgrade（全机型）并按机型预设升级源
+
+### 背景
+
+需求是把同作者的 `LianXia233/luci-app-online-upgrade` 接入本仓库**所有机型**，并让每套固件
+开箱即指向「自己那一组」发布产物。本仓库的机型维度是模组方案（`MT5700` / `MT5700M`），
+设备唯一（Hiveton H5000M，`mediatek/filogic`），构建矩阵固定并行产出两套固件，因此
+升级源必须按 `WRT_MODEM` 隔离，且不能写死一份静态配置共用。
+
+插件是「Rust 后端 + ucode rpcd + LuCI 前端」的 v2 实现，上游 `Build/Prepare` 与
+`Build/Compile` 均为空——按 OpenWrt 常规流程编译会得到一个没有 `/usr/bin/online-upgrade`
+的空壳包，因此接入必须同时解决**包导入**与**二进制预编译落位**两件事。
+
+### 变更
+
+- 新增 `Scripts/Packages-OnlineUpgrade.sh`：clone 上游到 `package/luci-app-online-upgrade`
+  （直连失败回退 `https://gh.acg2.mom/` 镜像），清 `.git` / `.github`，文本文件 CRLF→LF
+  并按字节复核；结构断言覆盖 `feeds/luci/luci.mk`、`./root/usr/bin/online-upgrade` 安装项、
+  `$(1)/usr/bin/online-upgrade` 安装目标、`rust/Cargo.{toml,lock}`、默认 UCI 配置与
+  `[profile.release]` 收敛项（`opt-level="z"` / `lto` / `codegen-units=1` / `panic="abort"` /
+  `strip`）；建 `root/usr/bin` 供预编译产物落位。
+- `90-online-upgrade-auto` 的守卫处理改为**按内容判定、幂等**：上游已在 `98a966a`
+  （2026-11-08）把守卫改成 `[ -x /usr/bin/online-upgrade ] && exit 0` /
+  `if [ ! -x /usr/bin/online-upgrade ]`，不再引用 v1 的 `online-upgrade.sh`。本仓库仅在
+  检测到 v1 路径时才改写，上游已修复则跳过；无论是否改写都断言最终代码行引用 v2 路径且
+  不含 v1 引用，同时核对 Makefile 安装项与守卫路径一致。
+- `Scripts/Settings.sh`：追加 `CONFIG_PACKAGE_luci-app-online-upgrade=y`，并在 `.config`
+  已包含该符号后调用预设脚本。
+- 新增 `Scripts/OnlineUpgradePreset.sh`：从 `Config/$WRT_CONFIG.txt` 解析设备符号
+  （平台 + 设备），结合 `WRT_MODEM / WRT_INFO / WRT_BRANCH` 生成
+  `files/etc/config/online-upgrade`。键名以 `rust/src/uci.rs`（section `online-upgrade.settings`）、
+  `github.rs`、`downloader.rs`、`upgrade.rs` 为准；上游默认配置里的 `enabled`、`keep_config`
+  代码并未读取，故不写入。
+- `WRT-CORE` 新增三个步骤：
+  - `Import Online Upgrade Package`（`Custom Packages` 之后，两套固件都执行）；
+  - `Rust Cache Key` + `Rust Build Cache`（`actions/cache@v6`，缓存 `~/.cargo/registry`、
+    `~/.cargo/git` 与后端 `target`，键含 `Cargo.lock` 的 sha256）；
+  - `Prepare Rust Toolchain`（原 `Cross Compile Rust Backends` 里的 rustup 与 zig 包装抽出来
+    供两套固件共用，因此 `MT5700M` 作业也能编译在线升级后端）；
+  - `Cross Compile Online Upgrade Backend`（`--locked --release` 交叉编译后落到
+    `package/luci-app-online-upgrade/root/usr/bin/online-upgrade`，含 aarch64 / 静态链接 /
+    无动态段 / 体积四项自检）。
+- `Custom Settings` 在 `make defconfig` 后硬性校验
+  `luci-app-online-upgrade`、`rpcd-mod-ucode`、`ucode-mod-fs`、`ucode-mod-uci` 均为 `y`，
+  避免「主包启用但运行期依赖缺失」留到刷机后暴露。
+- Rust 编译方式统一为**官方工具链**（rustup stable + `aarch64-unknown-linux-musl`）：
+  不使用 `feeds/packages/lang/rust`（需现场编译 host LLVM，1~2 小时、约 20GB，且产物
+  链接目标板 musl 动态库、panic/strip 策略与本仓库既有静态 musl 二进制不一致）；
+  链接器沿用 zig cc（与上游 `scripts/sdk-build.sh` 同方案，提供 musl libc 与启动对象）；
+  新增 `-C target-cpu=cortex-a53`（对齐 `ARCH_PACKAGES=aarch64_cortex-a53`），
+  不使用 `target-cpu=native`（runner 为 x86_64，会编出跨架构不可用的产物）。
+
+### 验证
+
+- `bash -n`：`Packages-OnlineUpgrade.sh`、`OnlineUpgradePreset.sh`、`Settings.sh` 全部通过。
+- YAML：`WRT-CORE.yml` 经 `yaml.safe_load` 解析通过。
+- 预设按机型模拟生成：`MT5700` / `MT5700M` 各生成一份配置，正则对**真实 Release 资产名**
+  匹配（`mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade-VIKINGYFY-owrt-wifi-yes-*.bin`），
+  并验证两个模组的正则互相不误匹配、`tag` 正则不跨组。
+- 导入脚本实跑：clone 上游 `98a966a` 后结构断言与守卫断言全部通过，CR 计数为 0。
+- LF / UTF-8：新增与修改文件均为纯 LF，无 BOM。
+- 脱敏扫描：本次差异不含任何密钥、令牌或个人信息。
+- Rust 后端编译耗时（本机 Windows 上 `cargo build --release --locked --target
+  aarch64-unknown-linux-musl`，zig 提供 musl 链接；runner 侧数据需 CI 复测）：
+  - 清空 target 的冷构建：**108.0 秒**，产物 3,049,760 字节（AArch64、静态链接、
+    无 `.dynamic` / `.interp`）；
+  - target 命中且源码无改动：**0.4 秒**；
+  - 仅改业务代码（重编 crate + LTO 重链接）：**34.8 秒**。
+  本机 cargo registry 已是热态，故冷构建不含 crates 下载；CI 上缓存另可省去
+  registry 拉取。作为参照，改造前 CI 的 `Cross Compile Rust Backends` 步骤
+  （风扇控制器 + at-webserver 两个后端）实测 87 秒。
+
+### 未验证
+
+- 完整固件编译未在本机执行（需完整 OpenWrt 工具链与数小时构建）。新增步骤的
+  端到端结果（`make defconfig` 是否拉齐三件 ucode 依赖、交叉编译产物在设备上运行、
+  LuCI 升级页面取到正确 Release）留待 CI 验证。
+
 ## [2026-11-07] 修复上游源码包与 Rust 工具链下载挂起导致的 runner 失联
 
 ### 背景

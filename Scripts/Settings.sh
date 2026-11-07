@@ -101,3 +101,15 @@ fi
 if [ -n "$WRT_PACKAGE" ]; then
 	echo -e "$WRT_PACKAGE" >> ./.config
 fi
+
+# ===== 在线升级插件（两套固件都装）=====
+# 包体由 Scripts/Packages-OnlineUpgrade.sh 在 Custom Packages 阶段 clone 到
+# package/，Rust 后端由 WRT-CORE 的 Cross Compile Online Upgrade Backend 步骤
+# 预编译后落到包内 root/usr/bin/online-upgrade（上游 Build/Compile 为空）。
+# 依赖 rpcd-mod-ucode / ucode-mod-fs / ucode-mod-uci 由包 DEPENDS 自动拉取，
+# defconfig 之后由 Custom Settings 校验三者确实为 y。
+echo "CONFIG_PACKAGE_luci-app-online-upgrade=y" >> ./.config
+
+# 按机型生成出厂升级源（./files/etc/config/online-upgrade，覆盖包自带的同名
+# conffile）。必须在 .config 已包含上面的符号之后调用，脚本据此判断是否生效。
+"$GITHUB_WORKSPACE/Scripts/OnlineUpgradePreset.sh" || exit 1
