@@ -2,6 +2,58 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-07] 修复上游源码包与 Rust 工具链下载挂起导致的 runner 失联
+
+### 背景
+
+11-06 的 apt 镜像修复（`Select Apt Mirror` 测速切换 + 孤儿死锁治理）当天验证通过，
+11-07 00:30 UTC 随 `Auto-Clean` 触发的 `MTK-AUTO`（run 128）却以更隐蔽的方式失败：
+两个 job 先后 `The hosted runner lost communication with the server`，且日志端点
+404（BlobNotFound），一个字节的日志都没能留下。逐步骤时间戳对比前一日成功运行
+（run 127）后才定位：
+
+| Job | 死点 | 本次实测 | 前日成功基准 |
+| --- | --- | --- | --- |
+| MT5700M | `Download Packages`（`make download`） | 卡 77 分钟后失联 | 82 秒 |
+| MT5700 | `Cross Compile Rust Backends` | 卡约 100 分钟后失联 | 87 秒 |
+
+前置步骤（apt 测速、init、feeds、Smoke Test）全部正常且耗时与前日一致 ——
+说明 apt 侧修复有效，这次是**同类事故换了个地方发生**：源码包镜像与 Rust 工具链
+下载链路（crates.io 索引 / rustup dist / PyPI）「连上但吞吐趋零」。与 11-06 的
+apt 镜像事故共享同一结构性缺陷：
+
+- `download.pl` 的多镜像轮换只在**连接失败**时触发，慢速挂起永远不会切换；
+- `cargo` / `rustup` / `pip` 对下载均无默认总超时；
+- job 级 `timeout-minutes: 300` 的兜底在 ~1.5 小时 runner 被环境回收面前
+  永远等不到触发，于是既丢日志、也丢诊断线索，只能靠猜。
+
+### 变更
+
+- **`Download Packages` 收束 + 降级重试**：首轮 `timeout --kill-after=60 900
+  make download -j$(nproc)`（基准 82~112 秒，上限 15 分钟）；超时或失败后降级
+  `-j1 V=s` 逐文件重试（上限 30 分钟）—— 单线程下 `download.pl` 为每个文件
+  轮换下一个镜像源，是社区通行的自愈路径。源码包先落 `tmp/dl`、校验哈希通过
+  才进 `dl/`，中断不留损坏文件，重试只补缺失部分。`timeout` 直接包 `make`
+  （无 `sudo` 夹层），其自建进程组能让 SIGTERM/SIGKILL 命中全部下载子进程，
+  不会重演 11-06 的孤儿锁事故。
+- **`Cross Compile Rust Backends` 四个下载点逐一收束**：
+  - rustup-init 改为先落盘再执行（`--connect-timeout 30 --max-time 120`），
+    与 init 脚本同款套路 —— `curl | sh` 模式下 curl 挂死会让 sh 读到空内容
+    并以 0 退出，缺工具链要到几小时后的编译阶段才暴露；
+  - `rustup target add`（约 200MB 标准库）套 `timeout 900`，失败重试一次；
+  - `cargo test`（零依赖 crate）套 `timeout 900`；
+  - 两处 `cargo build` 套 `timeout`（风扇控制器 1200 / at-webserver 1800，
+    后者含 Tokio + rustls + ring 依赖树下载与 zig 链接），失败重试一次，
+    中断只影响未完成编译单元，重跑从 target 缓存续建；
+  - `pip install ziglang` 加 `--timeout 60 --retries 3`。
+- **`Compile Firmware` 首轮同样收束**：编译期偶有按需补下载源码包，属同一风险。
+  首轮 `-j$(nproc)` 套 `timeout 5400`（基准 ~35 分钟），失败仍降级 `-j1 V=s`
+  断点续编（套 `timeout 7200`）。两层上限合计 210 分钟，仍小于 job 级
+  `timeout-minutes: 300`，保证兜底链完整。
+
+未改编译参数、缓存键与任何构建逻辑；所有收束上限均为对应基准耗时的 8 倍以上，
+正常构建不受影响。
+
 ## [2026-11-06] 修复有界重试自身的孤儿 apt 死锁，并把镜像测速换成真实批量负载
 
 ### 背景
