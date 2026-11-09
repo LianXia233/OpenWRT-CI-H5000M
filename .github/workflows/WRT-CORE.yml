@@ -249,6 +249,9 @@ jobs:
 
       - name: Initialization Values
         run: |
+          # 记录 job 起始时间：Compile Firmware 用它把编译预算收敛到 job 上限之内
+          # （前置步骤变慢时自动少给编译时间，而不是跑满预算后撞上 360 分钟被强杀）。
+          echo "JOB_START_EPOCH=$(date +%s)" >> $GITHUB_ENV
           echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
@@ -951,14 +954,29 @@ jobs:
           # （90 + 120 分钟）与 300 分钟 job 上限都不可能完成；而 -j1 不是「续编」而是
           # 把剩余工作放大数倍，正是第二轮毫无进展的原因。
           #
-          # 改为「总预算 + 等长分片续编」：
+          # 改为「自适应总预算 + 等长分片续编」：
           #   - 每个分片 45 分钟，始终 -j$(nproc)：超时只中断当前分片，不是整轮构建；
           #   - make 幂等，分片之间从断点继续，损失仅为被 SIGTERM 打断的个别编译单元；
-          #   - 总预算 300 分钟（job 上限 360 分钟，前后步骤约 20 分钟），覆盖实测冷编译，
-          #     且每周缓存被清空后仍能成功，从而把新缓存写回去、后续运行回到 40 分钟量级；
+          #   - 总预算上限 300 分钟（冷编译实测的量级），并从前置步骤耗时中扣除，
+          #     保证 job 总时长不超过 360 分钟上限（留 10 分钟给打包与发布）；
+          #   - 冷编译成功后新缓存会被写回，后续运行回到 40 分钟量级；
           #   - 源码包按需下载挂起同样被单个分片的 timeout 收束，下一分片重新轮换镜像，
           #     不会像以前那样一次挂起就吃掉整轮预算。
-          DEADLINE=$(( $(date +%s) + 300 * 60 ))
+          JOB_CAP=21000   # 350 分钟：360 分钟 job 上限减 10 分钟给后续步骤
+          MAX_BUDGET=18000 # 300 分钟：冷编译预算上限
+          if [ -n "${JOB_START_EPOCH:-}" ]; then
+            elapsed=$(( $(date +%s) - JOB_START_EPOCH ))
+          else
+            elapsed=900
+          fi
+          budget=$(( JOB_CAP - elapsed ))
+          if [ "$budget" -lt 3600 ]; then
+            echo "::error::job 已耗时 $((elapsed / 60)) 分钟，剩余预算不足 60 分钟，无法完成编译"
+            exit 1
+          fi
+          if [ "$budget" -gt "$MAX_BUDGET" ]; then budget=$MAX_BUDGET; fi
+          echo "==> 编译预算 $((budget / 60)) 分钟（job 已耗时 $((elapsed / 60)) 分钟）"
+          DEADLINE=$(( $(date +%s) + budget ))
           CHUNK=2700
           attempt=0
           fast_fail=0
@@ -966,7 +984,7 @@ jobs:
             attempt=$((attempt + 1))
             remain=$(( DEADLINE - $(date +%s) ))
             if [ "$remain" -le 60 ]; then
-              echo "::error::固件编译用尽 300 分钟总预算仍未完成（已尝试 ${attempt} 次）"
+              echo "::error::固件编译用尽 ${budget} 秒总预算仍未完成（已尝试 ${attempt} 次）"
               echo "::error::最近 10 分钟内的编译产物（便于定位卡点）："
               find . -name '*.built' -newermt '-10 minutes' 2>/dev/null | head -5 || true
               exit 1
