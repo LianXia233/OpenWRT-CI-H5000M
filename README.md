@@ -106,14 +106,15 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 | **`WRT-BUILD.yml`** | 手动 `workflow_dispatch` | 手动定制编译：固定并行产出 `MT5700` / `MT5700M` 两套固件；支持追加临时参数或开启 `TEST=true` 快速语法自检 |
 | **`MTK-AUTO.yml`** | 每日定时 / 联动触发 | 自动化构建并发布 H5000M 的两套最新固件，发布为两个独立的 Release |
 | **`Auto-Clean.yml`** | 每日定时 05:00 (CST) | 自动保留最新 Release，清理历史废旧 Tag 与 30 天以前的 Actions 日志 |
-| **`Cache-Clean.yml`** | 每周定时 / 手动 | 回收 Actions 编译缓存，避免依赖冲突与缓存膨胀 |
+| **`Cache-Clean.yml`** | 每周定时 / 手动 | 清理旧缓存快照，保留每个前缀最新一份，保证后续构建走增量编译 |
 
 ### 固件命名规则
 
-编译产物在 Release 中统一按 `机型-模组插件-编译日期` 命名，两套固件靠模组字段精确隔离：
+Release 只收集可刷写固件，统一按 `机型-模组插件-编译日期` 命名，两套固件靠模组字段精确隔离：
 - `H5000M-MT5700-<时间>.bin`
 - `H5000M-MT5700M-<时间>.bin`
-- 同前缀的辅助文件：`*.manifest`、`*.config.txt`
+
+`manifest`、`.config` 等辅助文件不再随 Release 发布。
 
 机型取自 OpenWrt 设备定义中的 `DEVICE_MODEL`（解析不到时退回设备名），日期为构建时间（`YY.MM.DD-HH.MM.SS`，CST）。
 

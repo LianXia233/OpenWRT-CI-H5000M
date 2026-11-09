@@ -1108,31 +1108,28 @@ jobs:
           ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_DATE}"
           echo "产物前缀：$ASSET_PREFIX（设备 ${WRT_DEVICE}）"
 
-          cp -f ./.config ./upload/"$ASSET_PREFIX".config.txt
-
           if [[ $WRT_TEST != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
             echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
-            # 固件镜像与 manifest 共用同一前缀，仅扩展名不同（本机型只产出
-            # sysupgrade.bin，不存在同扩展名的多个镜像）。
-            find ./bin/targets/ -type f -iname "*$WRT_DEVICE*" -print0 |
+            # Release 只收集可刷写固件：按设备名匹配镜像并统一命名，
+            # manifest / .config 等辅助文件不再放入 Release 资产。
+            # 同扩展名冲突时回退原始文件名，避免覆盖（本机型目前仅 sysupgrade.bin）。
+            find ./bin/targets/ -type f -iname "*$WRT_DEVICE*" \
+              \( -iname "*.bin" -o -iname "*.itb" -o -iname "*.img.gz" \) -print0 |
             while IFS= read -r -d '' FILE; do
-              EXT="${FILE##*.}"
-              mv -f "$FILE" "./upload/$ASSET_PREFIX.$EXT"
+              DEST="./upload/$ASSET_PREFIX.${FILE##*.}"
+              [ -e "$DEST" ] && DEST="./upload/$(basename "$FILE")"
+              mv -f "$FILE" "$DEST"
             done
 
-            find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
-
-            # 过滤非固件小文件：mediatek 目标编译时会把 mt798x-ram-*-bl2 等
-            # DDR 引导辅助 bin（<1MB，仅供开发者二次拼包，不可直接刷写）输出到
-            # bin/targets，上面的兜底搬运会把它带进 upload。真正的固件 bin 都是
-            # 几十 MB 的 sysupgrade / factory / kernel 镜像，按「.bin 且小于 2MB
-            # 即非固件」过滤，Release 页面只保留正常固件与 Config / manifest
-            # 等文本辅助文件。-print 把被删文件记进日志，便于事后核对。
-            find ./upload/ -type f -iname "*.bin" -size -2M -print -delete
+            if [ -z "$(find ./upload/ -type f -print -quit)" ]; then
+              echo "::error::未找到属于 $WRT_DEVICE 的可刷写固件，未生成 Release 资产"
+              exit 1
+            fi
+            find ./upload/ -type f -printf '%f\n'
 
             make clean -j$(nproc)
           fi

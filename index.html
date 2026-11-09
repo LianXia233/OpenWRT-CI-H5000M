@@ -862,19 +862,19 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
                         <span class="font-mono font-bold text-slate-900 text-xs">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.bin</span>
-                        <p class="text-slate-600 mt-0.5"><strong>系统升级包（最常用）</strong>：已刷入 OpenWRT/ImmortalWrt 系统后，在 LuCI 网页后台「系统 -> 备份/升级」直接上传更新并保留配置。</p>
-                    </div>
-                    <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">*.manifest</span>
-                        <p class="text-slate-600 mt-0.5"><strong>软件包与内核清单</strong>：记录该固件内置的内核版本与全部 luci/kmod 包，便于核对版本差异。</p>
-                    </div>
-                    <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">*.config.txt</span>
-                        <p class="text-slate-600 mt-0.5"><strong>构建配置文件清单</strong>：记录该版本的全量内核与插件配置参数，方便比对差异或本地自编译复现。</p>
+                        <p class="text-slate-600 mt-0.5"><strong>系统升级包（唯一发布产物）</strong>：已刷入 OpenWRT/ImmortalWrt 系统后，在 LuCI 网页后台「系统 -> 备份/升级」直接上传更新并保留配置。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
                         <span class="font-mono font-bold text-slate-900 text-xs">机型-模组插件-编译日期</span>
-                        <p class="text-slate-600 mt-0.5"><strong>统一命名规则</strong>：机型固定为 H5000M，模组标识区分 MT5700 / MT5700M，日期格式 <code class="font-mono">YY.MM.DD-HH.MM.SS</code>（CST），下载时请认准模组字段。</p>
+                        <p class="text-slate-600 mt-0.5"><strong>统一命名规则</strong>：机型固定为 H5000M，模组标识区分 MT5700 / MT5700M，日期格式 <code class="font-mono">YY.MM.DD-HH.MM.SS</code>（CST）。</p>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
+                        <span class="font-mono font-bold text-slate-900 text-xs">两套模组固件</span>
+                        <p class="text-slate-600 mt-0.5"><strong>务必按设备模组选择</strong>：MT5700 与 MT5700M 的插件独占同一 AT 串口，不能混刷；下载前先确认文件名中的模组字段。</p>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
+                        <span class="font-mono font-bold text-slate-900 text-xs">仅保留固件</span>
+                        <p class="text-slate-600 mt-0.5"><strong>Release 更精简</strong>：<code class="font-mono">manifest</code>、<code class="font-mono">.config</code> 等辅助文件不再随 Release 发布，构建信息可直接查看 Release 说明。</p>
                     </div>
                 </div>
             </div>
@@ -1158,7 +1158,7 @@
 
                     <!-- 固件文件列表 -->
                     <div class="mt-6 space-y-3">
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">固件文件与配置资产 (${rel.assets ? rel.assets.length : 0})</h4>
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">固件文件 (${rel.assets ? rel.assets.length : 0})</h4>
                         
                         ${rel.assets && rel.assets.length > 0 ? `
                         <div class="grid grid-cols-1 gap-2.5">
@@ -1279,28 +1279,6 @@
                                 </div>
                             </div>
                             <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>
-                        </div>
-
-                        <div class="p-3.5 rounded-2xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div class="flex items-center gap-3">
-                                <span class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold font-mono">TXT</span>
-                                <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.manifest</p>
-                                    <p class="text-[11px] text-slate-400">软件包与内核清单 · 记录本次固件内置的内核版本与全部 luci/kmod 包</p>
-                                </div>
-                            </div>
-                            <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>
-                        </div>
-
-                        <div class="p-3.5 rounded-2xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div class="flex items-center gap-3">
-                                <span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold font-mono">TXT</span>
-                                <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.config.txt</p>
-                                    <p class="text-[11px] text-slate-400">完整编译 .config 清单 · 包含所有选中的 kmod 与 luci 扩展包</p>
-                                </div>
-                            </div>
-                            <span class="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg self-start sm:self-center">自动归档</span>
                         </div>
                     </div>
                 </div>
