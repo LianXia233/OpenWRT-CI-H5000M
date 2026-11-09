@@ -64,14 +64,19 @@ fi
 PLATFORM="${DEVICE_SYM%%_DEVICE_*}"
 PLATFORM="${PLATFORM#DEVICE_}"
 DEVICE_NAME="${DEVICE_SYM##*_DEVICE_}"
+# 产物名里的机型取设备定义的 DEVICE_MODEL（如 H5000M），与 WRT-CORE
+# 「Package Firmware」一致；解析不到时退回 OpenWrt 设备名。
+MODEL=$(grep -rhA10 "^define Device/$DEVICE_NAME$" target/linux/*/image/*.mk 2>/dev/null \
+	| sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
+MODEL="${MODEL:-$DEVICE_NAME}"
 
 # 资产名规则取自 WRT-CORE「Package Firmware」：机型-模组插件-编译日期.<ext>
-# 实测：hiveton_h5000m-MT5700-26.11.09-18.27.39.bin
+# 实测：H5000M-MT5700-26.11.09-18.27.39.bin
 # 因此用「机型 + 模组标识 + 日期 + .bin」锚定：
 #   - 结尾 .bin 排除同批上传的 .manifest / *.config.txt；
 #   - 模组标识两侧都带连字符，MT5700 的正则不会命中 MT5700M
 #     （后者是 -MT5700M-，最后一个字符是 M，不构成 -MT5700-）。
-PATTERN="^${DEVICE_NAME}-${WRT_MODEM}-.*\.bin\$"
+PATTERN="^${MODEL}-${WRT_MODEM}-.*\.bin\$"
 
 # tag 语义来自 rust/src/github.rs：latest 取最新 Release，latest@<正则>
 # 只在 tag 名匹配该正则的 Release 里找最新。这里按「配置-来源-分支-模组」

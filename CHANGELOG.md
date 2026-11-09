@@ -14,15 +14,17 @@
 
 - **`WRT-CORE.yml`**：
   - `Initialization Values` 新增 `WRT_DEVICE`，从 `Config/<方案>.txt` 的
-    `CONFIG_TARGET_*_DEVICE_*=y` 解析机型（`MULTI_PROFILE` 两种写法均支持）。
+    `CONFIG_TARGET_*_DEVICE_*=y` 解析设备（`MULTI_PROFILE` 两种写法均支持）。
   - `Package Firmware` 统一按 `机型-模组插件-编译日期.<ext>` 命名固件与 manifest，
-    如 `hiveton_h5000m-MT5700-26.11.09-18.27.39.bin`；配置归档同步为
-    `<同前缀>.config.txt`。重命名循环改用 `find -print0` + `read -d ''`，避免文件名
-    含空格时被拆词。不再使用的 `WRT_WIFI` 一并移除。
-- **`Scripts/OnlineUpgradePreset.sh`**：`firmware_pattern` 同步收敛为
-  `^<机型>-<模组>-.*\.bin$`，保证在线升级仍能精确命中新命名的产物。
+    如 `H5000M-MT5700-26.11.09-18.27.39.bin`；机型取 OpenWrt 设备定义里的
+    `DEVICE_MODEL`，配置归档同步为 `<同前缀>.config.txt`。重命名循环改用
+    `find -print0` + `read -d ''`，避免文件名含空格时被拆词。不再使用的
+    `WRT_WIFI` 一并移除。
+- **`Scripts/OnlineUpgradePreset.sh`**：同样解析 `DEVICE_MODEL`，`firmware_pattern`
+  同步收敛为 `^<机型>-<模组>-.*\.bin$`，保证在线升级仍能精确命中新命名的产物。
 - **README**：更新「固件命名规则」与「在线升级插件与机型预设」表中的
   `firmware_pattern` 示例。
+- **已有 Release**：将 2026-11-09 发布的 `MT5700` 资产按新规则重命名（内容不变）。
 
 ### 验证
 

@@ -1095,14 +1095,18 @@ jobs:
           cd ./wrt/ && mkdir ./upload/
 
           # Release 资产统一命名：机型-模组插件-编译日期.<ext>
-          # 例：hiveton_h5000m-MT5700-26.11.09-18.27.39.bin
-          # 机型取自 Config 里的目标设备符号；平台/子平台/来源/分支/无线模式都是
-          # 固定信息，不再堆进文件名，避免各变体产物只能靠中间字段区分。
+          # 机型取 OpenWrt 设备定义里的 DEVICE_MODEL（H5000M），与 Release 里的
+          # 品牌型号一致；平台/子平台/来源/分支/无线模式都是固定信息，不再堆进
+          # 文件名，避免各变体产物只能靠中间字段区分。
           if [ -z "${WRT_DEVICE:-}" ]; then
             echo "::error::未能从 Config/$WRT_CONFIG.txt 解析目标设备（CONFIG_TARGET_*_DEVICE_*=y），无法生成产物名"
             exit 1
           fi
-          ASSET_PREFIX="${WRT_DEVICE}-${WRT_MODEM}-${WRT_DATE}"
+          WRT_MODEL=$(grep -rhA10 "^define Device/$WRT_DEVICE$" target/linux/*/image/*.mk 2>/dev/null \
+            | sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
+          WRT_MODEL="${WRT_MODEL:-$WRT_DEVICE}"
+          ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_DATE}"
+          echo "产物前缀：$ASSET_PREFIX（设备 ${WRT_DEVICE}）"
 
           cp -f ./.config ./upload/"$ASSET_PREFIX".config.txt
 
