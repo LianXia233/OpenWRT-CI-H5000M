@@ -76,10 +76,15 @@ jobs:
     # 而 immortalwrt 初始化脚本与部分 host 依赖尚未适配，迁移会造成编译中断。
     # 固定到 ubuntu-24.04 保证可复现构建（需更新镜像时只需改这一处）。
     runs-on: ubuntu-24.04
-    # 兜底上限：正常构建约 40 分钟。2026-11-06 事故中 apt 下载退化把 job 拖到 2.5 小时，
-    # 最终 runner 被环境回收、日志也没能上传（job 日志端点返回 404），只能靠猜。
+    # 兜底上限：缓存命中时正常构建约 40 分钟。2026-11-06 事故中 apt 下载退化把 job 拖到
+    # 2.5 小时，最终 runner 被环境回收、日志也没能上传（job 日志端点返回 404），只能靠猜。
     # 显式收束可让异常在可观测的时间窗内以失败告终，并保留日志。
-    timeout-minutes: 300
+    #
+    # 2026-11-09 run 130：Cache-Clean 周日清空全部缓存后，两个作业都是冷编译，
+    # 4 核 runner 上 3.5 小时仍没编完（详见 Compile Firmware 注释）。冷编译不是异常，
+    # 是每周必然出现一次的正常路径，300 分钟的 job 上限不足以覆盖它 → 提高到
+    # GitHub 允许的上限 360 分钟，并把编译步骤的总预算按 300 分钟分配。
+    timeout-minutes: 360
     steps:
       - name: Checkout Projects
         # node24：actions/checkout@v4 仍运行在已弃用的 Node 20 上
@@ -939,11 +944,66 @@ jobs:
         run: |
           cd ./wrt/
 
-          # 编译期偶有按需补下载源码包，与 Download Packages 同样的挂起风险，
-          # 首轮 -j$(nproc) 用 timeout 收束（基准 ~35 分钟），失败降级 -j1 V=s
-          # 从断点续编并打印详细日志。
-          timeout --kill-after=60 5400 make -j$(nproc) \
-            || timeout --kill-after=60 7200 make -j1 V=s
+          # 2026-11-09 run 130 复盘：Cache-Clean 在周日删掉全部缓存，两个作业都从零开始，
+          # 首轮 90 分钟在 toolchain/gcc/final（MT5700M 还卡在 tools/llvm-bpf 的 clang 编译）
+          # 被 SIGTERM；降级命令 `make -j1 V=s` 把 4 核并行改成单线程，又空烧 120 分钟
+          # 仍停在同一处，最终 step 以 124 退出。冷编译实测需要 4 小时以上，旧的双重超时
+          # （90 + 120 分钟）与 300 分钟 job 上限都不可能完成；而 -j1 不是「续编」而是
+          # 把剩余工作放大数倍，正是第二轮毫无进展的原因。
+          #
+          # 改为「总预算 + 等长分片续编」：
+          #   - 每个分片 45 分钟，始终 -j$(nproc)：超时只中断当前分片，不是整轮构建；
+          #   - make 幂等，分片之间从断点继续，损失仅为被 SIGTERM 打断的个别编译单元；
+          #   - 总预算 300 分钟（job 上限 360 分钟，前后步骤约 20 分钟），覆盖实测冷编译，
+          #     且每周缓存被清空后仍能成功，从而把新缓存写回去、后续运行回到 40 分钟量级；
+          #   - 源码包按需下载挂起同样被单个分片的 timeout 收束，下一分片重新轮换镜像，
+          #     不会像以前那样一次挂起就吃掉整轮预算。
+          DEADLINE=$(( $(date +%s) + 300 * 60 ))
+          CHUNK=2700
+          attempt=0
+          fast_fail=0
+          while :; do
+            attempt=$((attempt + 1))
+            remain=$(( DEADLINE - $(date +%s) ))
+            if [ "$remain" -le 60 ]; then
+              echo "::error::固件编译用尽 300 分钟总预算仍未完成（已尝试 ${attempt} 次）"
+              echo "::error::最近 10 分钟内的编译产物（便于定位卡点）："
+              find . -name '*.built' -newermt '-10 minutes' 2>/dev/null | head -5 || true
+              exit 1
+            fi
+            slice=$CHUNK
+            if [ "$remain" -lt "$slice" ]; then slice=$remain; fi
+            echo "==> 编译分片 #${attempt}：${slice}s，剩余预算 $((remain / 60)) 分钟，-j$(nproc)"
+            if timeout --kill-after=60 "$slice" make -j$(nproc); then
+              echo "==> 固件编译完成（分片 #${attempt}）"
+              break
+            else
+              rc=$?
+              # 124/137：本次分片被 timeout 收束（挂起或单纯没编完），从断点续编是有效的。
+              # 其他退出码是 make 自己报错（源码/补丁/链接失败），续编会瞬间复现，
+              # 连续两次即判为真实编译错误终止，避免在剩余预算里空转。
+              if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+                fast_fail=0
+                echo "==> 分片 #${attempt} 超时（退出码 ${rc}），从断点续编"
+              else
+                fast_fail=$((fast_fail + 1))
+                echo "==> 分片 #${attempt} 失败（退出码 ${rc}），从断点续编（连续非超时失败 ${fast_fail} 次）"
+                if [ "$fast_fail" -ge 2 ]; then
+                  echo "::error::连续 ${fast_fail} 次非超时失败（退出码 ${rc}），判定为真实编译错误，终止"
+                  exit 1
+                fi
+              fi
+            fi
+          done
+
+          # make 返回 0 不足以保证产物存在（例如配置裁剪掉了镜像目标），这里显式核对。
+          if ! find bin/targets -type f \
+            \( -name '*.bin' -o -name '*.img' -o -name '*.itb' -o -name '*.squashfs' \) \
+            2>/dev/null | grep -q .; then
+            echo "::error::make 成功但 bin/targets 下没有固件镜像"
+            find bin/targets -maxdepth 3 -type f 2>/dev/null | head -20 || true
+            exit 1
+          fi
 
       - name: Machine Information
         run: |
