@@ -2,6 +2,44 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-09] Rust 插件编译提速：官方 SDK 为唯一来源 + 全量 cargo 缓存
+
+### 背景
+
+上一次成功运行（run 129）的步骤耗时显示，Rust 相关开销集中在 `Cross Compile Rust Backends`
+的 108 秒（其中 at-webserver 约 85 秒、风扇控制器约 20 秒）与 `Cross Compile Online
+Upgrade Backend` 的 21~41 秒：只有在线升级后端配了 cargo 缓存，而依赖树更大的
+at-webserver（131 个依赖，含 Tokio/rustls/ring）每次都从零重编。
+
+### 变更
+
+- **官方 SDK 作为唯一 Rust 编译来源**：`Prepare Rust Toolchain` 改为显式
+  `rustup toolchain install stable --profile minimal --target <triple>`（工具链与目标 std
+  一次装齐、已安装时幂等），固定 `RUSTUP_TOOLCHAIN=stable`，并把 `~/.cargo/bin` 写入
+  `GITHUB_PATH`。不再依赖 runner 预装版本，也不用发行版 cargo；错误地把目录写进
+  `GITHUB_ENV` 的旧兜底分支一并修正为 `GITHUB_PATH`。
+- **缓存覆盖全部三个 Rust 工程**：`Rust Build Cache` 新增 `/tmp/mt5700-target`、
+  `/tmp/h5fan-target`、`~/.cache/pip`，与原有的 registry/git、online-upgrade target 一起存一份。
+  依赖树不变时，at-webserver 只重编业务代码，不再重编整棵依赖树。
+- **缓存键更准确**：`Rust Cache Key` 由「只看 online-upgrade 的 Cargo.lock」改为
+  「三个 `Cargo.lock`（含路径前缀）的 sha256 + `rustc -vV` 的 release 版本」。任一依赖树变化
+  或官方工具链升级都会自动换键，避免用旧依赖编出的产物被当有效缓存。
+- **cargo 网络与构建参数**：`CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse`（索引比 git 协议快
+  一个数量级）、`CARGO_NET_RETRY=5`、`CARGO_HTTP_TIMEOUT=60`、`CARGO_HTTP_MULTIPLEXING=true`、
+  `CARGO_INCREMENTAL=0`（release 关闭增量，缓存与 fingerprint 行为稳定）。
+- **可观测性**：两个交叉编译步骤各自打印「编译用时 + Rust 缓存命中」；`Cross Compile Rust
+  Backends` 也拿到 `steps.rust-cache.outputs.cache-hit`，与在线升级后端口径一致。
+- README「Rust 后端编译方式」同步：明确纯 Rust crate 走官方 `rust-lld` + 自包含 musl，
+  zig 仅用于含 `ring` 的 C 代码，并补充新的缓存策略。
+
+### 验证
+
+- `yaml.safe_load` 解析通过（26 步），22 个 `run` 块逐块 `bash -n` 通过。
+- 缓存键算法在本地用三个真实 `Cargo.lock` 复算：含路径前缀的哈希稳定，缺失 lock（MT5700M 的
+  风扇控制器）时不影响其余两个工程。
+- 未验证：缓存命中后的实际耗时需下一次 Actions 运行观察（基线：at-webserver 85 s，
+  目标命中后 ~20 s）。
+
 ## [2026-11-09] 修复冷编译超时（run 130 失败）
 
 ### 背景

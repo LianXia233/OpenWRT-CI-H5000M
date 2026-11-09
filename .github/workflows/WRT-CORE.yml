@@ -657,24 +657,42 @@ jobs:
           make clean -j$(nproc)
 
       - name: Rust Cache Key
-        # 缓存键只依赖在线升级插件的 Cargo.lock：它的依赖树（Tokio + rustls +
-        # ring）是本仓库最重的 Rust 构建，registry 与 target 命中后重复构建
-        # 不再全量重编译。两套固件的该包源码与目标三元组完全相同，故键里不带
-        # WRT_MODEM，两个作业可共用同一份缓存（并行时先完成者写入）。
+        # 缓存键覆盖三个 Rust 工程（在线升级后端、at-webserver、风扇控制器）的
+        # Cargo.lock 与 rustc 版本：
+        #   - 三者的 target 目录都会缓存，任何一个依赖树变化都必须换键，否则会把
+        #     按旧依赖编出的产物当成有效缓存；
+        #   - 带上 rustc 版本，官方工具链随 stable 滚动时自动失效，避免新旧编译器
+        #     产物混在同一个 target 目录里（cargo 虽会按 fingerprint 重编，但白占体积）。
+        # 两套固件的源码与目标三元组一致，故键里不含 WRT_MODEM；MT5700M 侧风扇
+        # 控制器是纯 shell 版、没有 Cargo.lock，只把存在的 lock 参与哈希即可，
+        # registry 与 target 仍可通过 restore-keys 前缀复用。
         if: env.WRT_TEST != 'true'
         run: |
           cd ./wrt/
-          LOCK=package/luci-app-online-upgrade/rust/Cargo.lock
-          if [ ! -f "$LOCK" ]; then
-            echo "::error::$LOCK 不存在（Import Online Upgrade Package 未成功？），无法计算 Rust 缓存键"
+          LOCK_UP=package/luci-app-online-upgrade/rust/Cargo.lock
+          LOCK_AT=package/luci-app-mt5700/src/rust/Cargo.lock
+          LOCK_FAN=package/luci-app-h5000m-fancontrol/src/Cargo.lock
+          if [ ! -f "$LOCK_UP" ]; then
+            echo "::error::$LOCK_UP 不存在（Import Online Upgrade Package 未成功？），无法计算 Rust 缓存键"
             exit 1
           fi
-          echo "RUST_LOCK_HASH=$(sha256sum "$LOCK" | cut -c1-24)" >> "$GITHUB_ENV"
+          HASH=$(for f in "$LOCK_UP" "$LOCK_AT" "$LOCK_FAN"; do
+            [ -f "$f" ] && { echo "$f"; cat "$f"; }
+          done | sha256sum | cut -c1-16)
+          REL=$(rustc -vV 2>/dev/null | sed -n 's/^release: //p' | head -1)
+          echo "RUST_LOCK_HASH=${HASH}" >> "$GITHUB_ENV"
+          echo "RUSTC_REL=${REL:-unknown}" >> "$GITHUB_ENV"
+          echo "Rust 缓存键：locks=${HASH} rustc=${REL:-unknown}"
 
       - name: Rust Build Cache
-        # 等价于 Swatinem/rust-cache 的最小实现：缓存 cargo registry/git 索引与
-        # 在线升级后端的 target 目录。target 命中后「未改 Cargo.lock、只改业务
-        # 代码」的重复构建只重编 crate 自身，不再整棵依赖树重来。
+        # 缓存三份 cargo 副作用，避免每次运行重编依赖树：
+        #   registry/git —— crates.io 索引与 .crate 包（at-webserver 131 个依赖、
+        #                   online-upgrade 146 个依赖，冷拉取要 30~60 秒）；
+        #   *-target     —— 三个 crate 的 release 产物目录，命中后只重编业务代码
+        #                   （at-webserver 实测 85 秒，其中绝大部分是依赖树）；
+        #   ~/.cache/pip —— ziglang 的 wheel，省掉每次约 50MB 的 PyPI 下载。
+        # restore-keys 允许多级降级：依赖树未变但 rustc 升级时仍能复用 registry，
+        # target 目录里的过期单元由 cargo 自己的 fingerprint 判定重编。
         if: env.WRT_TEST != 'true'
         id: rust-cache
         uses: actions/cache@v6
@@ -682,10 +700,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cache/pip
+            /tmp/h5fan-target
+            /tmp/mt5700-target
             /tmp/rust-target-online-upgrade
-          key: rust-online-upgrade-${{ env.RUST_LOCK_HASH }}
+          key: rust-${{ env.RUST_LOCK_HASH }}-${{ env.RUSTC_REL }}
           restore-keys: |
-            rust-online-upgrade-
+            rust-${{ env.RUST_LOCK_HASH }}-
+            rust-
 
       - name: Prepare Rust Toolchain
         # 统一准备 Rust 官方工具链与 zig 交叉链接器，供下面两个编译步骤复用。
@@ -719,22 +741,45 @@ jobs:
           echo "ZIG_TARGET=$ZIG_TARGET" >> "$GITHUB_ENV"
           echo "Rust 目标：$RUST_TARGET（ARCH_PACKAGES=$ARCH_PACKAGES）"
 
-          echo "==> 准备 Rust 工具链"
-          if ! command -v cargo >/dev/null 2>&1; then
-            # 兜底：runner 镜像不再预装 Rust 时按需安装（minimal profile 即可）。
-            # 与 init 脚本同款套路：先落盘再执行 —— curl 管道喂 sh 时，curl 挂死
-            # 或失败会让 sh 读到空内容并以 0 退出，缺工具链要到几小时后才暴露。
+          echo "==> 准备 Rust 官方工具链（rustup stable，优先于发行版/内置 Rust）"
+          # 官方 SDK 是唯一编译来源：不用 feeds/packages/lang/rust（要现场编 host
+          # LLVM，1~2 小时、约 20GB），也不依赖 runner 预装版本 —— 显式 rustup 安装
+          # stable 并固定 RUSTUP_TOOLCHAIN，保证 rustc 版本与缓存键一致。
+          export PATH="$HOME/.cargo/bin:$PATH"
+          if ! command -v rustup >/dev/null 2>&1; then
+            # 先落盘再执行：curl 管道喂 sh 时，curl 挂死或失败会让 sh 读到空内容
+            # 并以 0 退出，缺工具链要到几小时后才暴露。
             curl -sSf --retry 3 --connect-timeout 30 --max-time 120 \
               https://sh.rustup.rs -o /tmp/rustup-init.sh
-            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable
-            echo "$HOME/.cargo/bin" >> "$GITHUB_ENV"
-            export PATH="$HOME/.cargo/bin:$PATH"
+            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable --no-modify-path
           fi
-          # target 标准库约 200MB，rustup 无内置下载超时；慢速挂起时收束并重试一次
-          timeout --kill-after=30 900 rustup target add "$RUST_TARGET" \
-            || timeout --kill-after=30 900 rustup target add "$RUST_TARGET"
-          cargo --version
-          rustc --version
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # 工具链与目标 std 一次装齐：分两步会多一轮索引解析与网络往返；
+          # 已安装时幂等（只校验不重下）。rustup 无内置下载超时，挂起时收束并重试一次。
+          timeout --kill-after=60 900 rustup toolchain install stable --profile minimal \
+            --target "$RUST_TARGET" --no-self-update \
+            || timeout --kill-after=60 900 rustup toolchain install stable --profile minimal \
+                 --target "$RUST_TARGET" --no-self-update
+          rustup default stable >/dev/null 2>&1 || true
+          # 固定工具链选择，避免项目内 rust-toolchain.toml 把构建切到别的版本
+          echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
+          # cargo 侧的网络与构建参数：sparse 索引比默认 git 索引快一个数量级；
+          # 重试/超时与 apt、下载步骤的收束策略一致；release 关闭增量，
+          # 让 target 缓存与 fingerprint 行为稳定可复现。
+          {
+            echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse"
+            echo "CARGO_NET_RETRY=5"
+            echo "CARGO_HTTP_TIMEOUT=60"
+            echo "CARGO_HTTP_MULTIPLEXING=true"
+            echo "CARGO_INCREMENTAL=0"
+          } >> "$GITHUB_ENV"
+
+          echo "   cargo: $(command -v cargo 2>/dev/null) $(cargo --version 2>/dev/null | awk '{print $2}')"
+          echo "   rustc: $(command -v rustc 2>/dev/null) $(rustc -vV 2>/dev/null | sed -n 's/^release: //p')"
+          rustup target list --installed | grep -qx "$RUST_TARGET" || {
+            echo "::error::官方工具链缺少目标 std：$RUST_TARGET"
+            exit 1
+          }
 
           echo "==> 准备 zig 交叉链接器"
           # 用 pip 安装 ziglang（官方 PyPI 发行包），避免 ziglang.org / GitHub Release
@@ -788,6 +833,9 @@ jobs:
         # （与上游 scripts/sdk-build.sh 同一方案）：Rust 的 musl target 不自带
         # libc 与启动对象，zig cc 一次提供 libc 与 C 编译器，免装目标板交叉工具链。
         if: env.WRT_TEST != 'true' && env.WRT_MODEM != 'MT5700M'
+        env:
+          # 与在线升级后端共用同一份 Rust 缓存，命中情况写进计时日志
+          RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
         run: |
           cd ./wrt/
 
@@ -801,10 +849,12 @@ jobs:
           echo "==> 交叉编译 h5000m-fancontrol（两套固件共用）"
           # 首次构建需下载 musl std 与解析索引，慢速挂起时收束并重试一次
           #（中断只影响未完成的编译单元，重跑从缓存续建）
+          FAN_START=$(date +%s)
           CARGO_TARGET_DIR=/tmp/h5fan-target timeout --kill-after=60 1200 \
             cargo build --release --locked --target "$RUST_TARGET" \
             || CARGO_TARGET_DIR=/tmp/h5fan-target timeout --kill-after=60 1200 \
             cargo build --release --locked --target "$RUST_TARGET"
+          echo "风扇控制器交叉编译用时：$(( $(date +%s) - FAN_START )) 秒（Rust 缓存命中=${RUST_CACHE_HIT:-false}）"
 
           echo "==> 产物自检"
           FAN_BIN="/tmp/h5fan-target/$RUST_TARGET/release/h5000m-fancontrol"
@@ -840,10 +890,12 @@ jobs:
           export RUSTFLAGS="-C link-self-contained=no"
           # --locked：Cargo.lock 由上游固定，避免 CI 上解析出与发布产物不同的依赖树。
           # Tokio + rustls + ring 依赖树的下载与 zig 链接最重，挂起时收束并重试一次
+          AT_START=$(date +%s)
           CARGO_TARGET_DIR=/tmp/mt5700-target timeout --kill-after=60 1800 \
             cargo build --release --locked --target "$RUST_TARGET" \
             || CARGO_TARGET_DIR=/tmp/mt5700-target timeout --kill-after=60 1800 \
             cargo build --release --locked --target "$RUST_TARGET"
+          echo "at-webserver 交叉编译用时：$(( $(date +%s) - AT_START )) 秒（Rust 缓存命中=${RUST_CACHE_HIT:-false}）"
 
           echo "==> 产物自检"
           BIN="/tmp/mt5700-target/$RUST_TARGET/release/at-webserver"

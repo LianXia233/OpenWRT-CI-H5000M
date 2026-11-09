@@ -141,11 +141,11 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 
 ### Rust 后端编译方式
 
-- 使用 **Rust 官方工具链**（rustup stable + `aarch64-unknown-linux-musl` std），不使用 `feeds/packages/lang/rust`：后者需现场编译 host LLVM（1~2 小时、约 20GB 磁盘），其产物链接目标板的 musl 动态库，与本仓库既有的静态 musl 二进制策略及 panic/strip 处理不一致。
-- 交叉链接器用 zig cc（本仓库既有方案，与上游 `scripts/sdk-build.sh` 一致）：Rust 的 musl target 不自带 libc 与启动对象，zig cc 一次提供 libc 与 C 编译器；该依赖树含 `ring` 的 C 代码。
+- 使用 **Rust 官方工具链**（rustup stable + `aarch64-unknown-linux-musl` std），不使用 `feeds/packages/lang/rust`：后者需现场编译 host LLVM（1~2 小时、约 20GB 磁盘），其产物链接目标板的 musl 动态库，与本仓库既有的静态 musl 二进制策略及 panic/strip 处理不一致。工作流里显式 `rustup toolchain install stable --profile minimal --target …` 并固定 `RUSTUP_TOOLCHAIN=stable`，不依赖 runner 预装版本，也不用发行版 cargo。
+- 链接：纯 Rust crate（风扇控制器）用官方 SDK 自带的 `rust-lld` + 自包含 musl 静态链接；含 `ring` C 代码的两个后端（at-webserver、online-upgrade）由 zig cc 提供 musl libc 与 C 编译器（与上游 `scripts/sdk-build.sh` 同一方案），zig 只承担 C 部分，Rust 侧仍全部由官方 SDK 编译。
 - `-C target-cpu=cortex-a53` 与固件 `ARCH_PACKAGES=aarch64_cortex-a53` 对齐；不使用 `target-cpu=native` —— runner 是 x86_64，native 会把宿主机指令集编进 aarch64 产物，跨架构不可用。
 - 产物收敛由上游 `[profile.release]` 保证（`opt-level="z"`、`lto=true`、`codegen-units=1`、`panic="abort"`、`strip=true`），导入脚本对这些键做断言，避免上游改动导致体积与符号策略漂移。
-- 缓存 `~/.cargo/registry`、`~/.cargo/git` 与后端 `target` 目录，键含 `Cargo.lock` 的 sha256；重复构建不再全量重编译依赖树。
+- 构建缓存：`~/.cargo/registry`、`~/.cargo/git`、三个 crate 的 `target` 目录（`/tmp/h5fan-target`、`/tmp/mt5700-target`、`/tmp/rust-target-online-upgrade`）与 pip 的 ziglang wheel 缓存统一存一份；键为「三个 `Cargo.lock` 的 sha256 + rustc release 版本」，依赖树或官方工具链变化都会自动换键。cargo 侧启用 sparse 索引、`CARGO_NET_RETRY=5`、`CARGO_HTTP_TIMEOUT=60`、`CARGO_INCREMENTAL=0`，并在每一步打印各 crate 的实际编译用时与缓存命中情况。
 
 ---
 
