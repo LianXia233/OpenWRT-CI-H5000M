@@ -252,7 +252,11 @@ jobs:
           # 记录 job 起始时间：Compile Firmware 用它把编译预算收敛到 job 上限之内
           # （前置步骤变慢时自动少给编译时间，而不是跑满预算后撞上 360 分钟被强杀）。
           echo "JOB_START_EPOCH=$(date +%s)" >> $GITHUB_ENV
-          echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+          # WRT_DATE 继续用于 Release 标签（格式保持不变），WRT_DATE_SHORT 只用于产物名。
+          # 两者由同一次 date 取出，避免跨零点时标签日期与文件名日期不一致。
+          WRT_NOW="$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S:%Y%m%d")"
+          echo "WRT_DATE=${WRT_NOW%%:*}" >> $GITHUB_ENV
+          echo "WRT_DATE_SHORT=${WRT_NOW##*:}" >> $GITHUB_ENV
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
           echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
@@ -1094,10 +1098,12 @@ jobs:
         run: |
           cd ./wrt/ && mkdir ./upload/
 
-          # Release 资产统一命名：机型-模组插件-编译日期.<ext>
-          # 机型取 OpenWrt 设备定义里的 DEVICE_MODEL（H5000M），与 Release 里的
-          # 品牌型号一致；平台/子平台/来源/分支/无线模式都是固定信息，不再堆进
-          # 文件名，避免各变体产物只能靠中间字段区分。
+          # 产物统一命名：<机型>-<模组插件>-<编译日期>[-<镜像类型>].<扩展名>
+          # 机型取 OpenWrt 设备定义里的 DEVICE_MODEL（H5000M），模组插件取
+          # WRT_MODEM（MT5700 / MT5700M），编译日期用 YYYYMMDD（WRT_DATE_SHORT）。
+          # 镜像类型后缀必须保留：同次构建可能产出多个完整镜像格式，去掉后会互相
+          # 覆盖；也便于 OTA 与下载页精确识别主固件。
+          # 源码/分支/时间戳等固定信息保留在 Release 标签与描述里，不再堆进文件名。
           if [ -z "${WRT_DEVICE:-}" ]; then
             echo "::error::未能从 Config/$WRT_CONFIG.txt 解析目标设备（CONFIG_TARGET_*_DEVICE_*=y），无法生成产物名"
             exit 1
@@ -1105,7 +1111,7 @@ jobs:
           WRT_MODEL=$(grep -rhA10 "^define Device/$WRT_DEVICE$" target/linux/*/image/*.mk 2>/dev/null \
             | sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
           WRT_MODEL="${WRT_MODEL:-$WRT_DEVICE}"
-          ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_DATE}"
+          ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_DATE_SHORT}"
           echo "产物前缀：$ASSET_PREFIX（设备 ${WRT_DEVICE}）"
 
           if [[ $WRT_TEST != 'true' ]]; then
@@ -1114,22 +1120,66 @@ jobs:
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
-            # Release 只收集可刷写固件：按设备名匹配镜像并统一命名，
-            # manifest / .config 等辅助文件不再放入 Release 资产。
-            # 同扩展名冲突时回退原始文件名，避免覆盖（本机型目前仅 sysupgrade.bin）。
-            find ./bin/targets/ -type f -iname "*$WRT_DEVICE*" \
-              \( -iname "*.bin" -o -iname "*.itb" -o -iname "*.img.gz" \) -print0 |
-            while IFS= read -r -d '' FILE; do
-              DEST="./upload/$ASSET_PREFIX.${FILE##*.}"
-              [ -e "$DEST" ] && DEST="./upload/$(basename "$FILE")"
-              mv -f "$FILE" "$DEST"
+            # 只发布「可直接刷写的完整固件」：按镜像类型白名单精确挑选。
+            # 旧逻辑按设备名 + 扩展名粗筛，会把 kernel.bin / rootfs.img.gz 等散件
+            # 一并搬进 upload，且 ${FILE##*.} 对 .img.gz 只取到 gz，扩展名被截断。
+            # 现在从文件名剥离平台/设备/squashfs 前缀得到 IMG_SLUG，非白名单留在
+            # bin/targets 随 make clean 回收。
+            for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_DEVICE*") ; do
+              BASE="$(basename "$FILE")"
+              EXT="$(printf '%s' "$BASE" | cut -d '.' -f 2-)"
+              NAME="$(printf '%s' "$BASE" | cut -d '.' -f 1)"
+              IMG_SLUG="$(printf '%s' "$NAME" | sed -E \
+                -e "s/^.*${WRT_DEVICE}-//" \
+                -e 's/^squashfs-//' \
+                -e 's/^initramfs-//')"
+              case "$IMG_SLUG" in
+                sysupgrade|factory|combined|combined-efi|image|image-efi)
+                  NEW_FILE="$ASSET_PREFIX-$IMG_SLUG.$EXT"
+                  if [ -e "./upload/$NEW_FILE" ]; then
+                    echo "::error::产物名冲突：$NEW_FILE（同一镜像类型出现多个文件），拒绝发布以免互相覆盖"
+                    exit 1
+                  fi
+                  mv -f "$FILE" "./upload/$NEW_FILE"
+                  echo "[keep]   $BASE -> $NEW_FILE" ;;
+                *)
+                  echo "[filter] $BASE (slug=${IMG_SLUG:-空})" ;;
+              esac
             done
 
-            if [ -z "$(find ./upload/ -type f -print -quit)" ]; then
-              echo "::error::未找到属于 $WRT_DEVICE 的可刷写固件，未生成 Release 资产"
+            # 发布前自检：upload 必须非空，且每个文件都命中固件文件名白名单。
+            # 上游产物结构变化时宁可构建失败，也不要发空 Release 或混进杂项。
+            UPLOAD_COUNT=$(find ./upload/ -maxdepth 1 -type f | wc -l)
+            if [ "$UPLOAD_COUNT" -eq 0 ]; then
+              echo "::error::upload 为空，未产出任何完整固件，拒绝发布"
               exit 1
             fi
-            find ./upload/ -type f -printf '%f\n'
+            for f in ./upload/*; do
+              [ -f "$f" ] || continue
+              case "$(basename "$f")" in
+                *-sysupgrade.bin|*-factory.bin|*-sysupgrade.itb|*-factory.itb|*-combined.img.gz|*-combined.vmdk|*-combined-efi.img.gz|*-combined-efi.vmdk|*-image.iso|*-image-efi.iso) ;;
+                *) echo "::error::upload 出现非固件文件：$(basename "$f")"; exit 1 ;;
+              esac
+            done
+            echo "=== 待发布固件（$UPLOAD_COUNT 个）==="
+            ls -lh ./upload/
+
+            # 固件 SHA256 表：luci-app-online-upgrade v2 的 github.rs 会依次找
+            # expected_sha256 配置 -> sha256sums / <固件>.sha256 资产 -> Release
+            # 正文里「含目标文件名的 64 位 hex 行」。预设里 expected_sha256 留空，
+            # CI 又已过滤掉所有非固件资产，因此把标准 sha256sum 格式写进 Release
+            # 正文，既不新增资产、也不占用 UCI 键，OTA 就能真正比对完整性。
+            # $GITHUB_ENV 用 heredoc 传多行值，Release body 再以环境变量引用。
+            {
+              echo "WRT_SHA256_TABLE<<WRT_SHA256_EOF"
+              echo ""
+              echo "### 固件校验（SHA256）"
+              echo ""
+              echo '```'
+              ( cd ./upload && sha256sum * )
+              echo '```'
+              echo "WRT_SHA256_EOF"
+            } >> "$GITHUB_ENV"
 
             make clean -j$(nproc)
           fi
@@ -1140,7 +1190,18 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_MODEM}}-${{env.WRT_DATE}}
-          files: ./wrt/upload/*.*
+          # 第二道闸门：即使打包环节漏进杂项，Release 也只发布白名单 glob
+          files: |
+            ./wrt/upload/*-sysupgrade.bin
+            ./wrt/upload/*-factory.bin
+            ./wrt/upload/*-sysupgrade.itb
+            ./wrt/upload/*-factory.itb
+            ./wrt/upload/*-combined.img.gz
+            ./wrt/upload/*-combined.vmdk
+            ./wrt/upload/*-combined-efi.img.gz
+            ./wrt/upload/*-combined-efi.vmdk
+            ./wrt/upload/*-image.iso
+            ./wrt/upload/*-image-efi.iso
           body: |
             Hiveton H5000M (MT5700M) 定制固件 · 基于 ImmortalWrt
 
@@ -1165,3 +1226,5 @@ jobs:
 
             MT5700M 插件版本：${{env.MT5700_PLUGIN_VERSION}}
             风扇插件版本：${{env.H5000M_FANCONTROL_VERSION}}
+
+            ${{env.WRT_SHA256_TABLE}}

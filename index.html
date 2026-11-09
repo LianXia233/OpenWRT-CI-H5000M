@@ -861,12 +861,12 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.bin</span>
+                        <span class="font-mono font-bold text-slate-900 text-xs">H5000M-&lt;模组&gt;-&lt;YYYYMMDD&gt;-sysupgrade.bin</span>
                         <p class="text-slate-600 mt-0.5"><strong>系统升级包（唯一发布产物）</strong>：已刷入 OpenWRT/ImmortalWrt 系统后，在 LuCI 网页后台「系统 -> 备份/升级」直接上传更新并保留配置。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
                         <span class="font-mono font-bold text-slate-900 text-xs">机型-模组插件-编译日期</span>
-                        <p class="text-slate-600 mt-0.5"><strong>统一命名规则</strong>：机型固定为 H5000M，模组标识区分 MT5700 / MT5700M，日期格式 <code class="font-mono">YY.MM.DD-HH.MM.SS</code>（CST）。</p>
+                        <p class="text-slate-600 mt-0.5"><strong>统一命名规则</strong>：机型固定为 H5000M，模组标识区分 MT5700 / MT5700M，日期格式 <code class="font-mono">YYYYMMDD</code>（编译日，CST），镜像类型固定为 <code class="font-mono">sysupgrade</code>。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
                         <span class="font-mono font-bold text-slate-900 text-xs">两套模组固件</span>
@@ -874,7 +874,7 @@
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
                         <span class="font-mono font-bold text-slate-900 text-xs">仅保留固件</span>
-                        <p class="text-slate-600 mt-0.5"><strong>Release 更精简</strong>：<code class="font-mono">manifest</code>、<code class="font-mono">.config</code> 等辅助文件不再随 Release 发布，构建信息可直接查看 Release 说明。</p>
+                        <p class="text-slate-600 mt-0.5"><strong>Release 更精简</strong>：<code class="font-mono">manifest</code>、<code class="font-mono">.config</code> 等辅助文件不再随 Release 发布；每个固件 <code class="font-mono">SHA256</code> 直接写在 Release 说明里，下载后可自行校验。</p>
                     </div>
                 </div>
             </div>
@@ -894,9 +894,9 @@
                     <span class="absolute top-5 right-5 text-4xl font-black text-slate-200 font-mono">01</span>
                     <h3 class="text-lg font-bold text-slate-900 mb-2">获取并校验固件</h3>
                     <p class="text-xs text-slate-600 leading-relaxed space-y-2">
-                        1. 从上方「固件下载」区选择对应模组（MT5700 / MT5700M）的 <code class="font-mono text-sky-700 bg-sky-50 px-1 py-0.5 rounded">H5000M-*.bin</code> 固件，先确认文件名中的模组标识与设备一致。<br>
+                        1. 从上方「固件下载」区选择对应模组（MT5700 / MT5700M）的 <code class="font-mono text-sky-700 bg-sky-50 px-1 py-0.5 rounded">H5000M-&lt;模组&gt;-&lt;YYYYMMDD&gt;-sysupgrade.bin</code> 固件，先确认文件名中的模组标识与设备一致。<br>
                         2. 推荐启用 <strong class="text-slate-800">ACG2 极速代理</strong>，国内千兆满速直下。<br>
-                        3. 校验下载文件的完整性，防止因网络波动导致文件损坏。
+                        3. 对照 Release 正文里的 <strong>SHA256</strong> 校验下载文件完整性，防止网络波动导致文件损坏。
                     </p>
                 </div>
 
@@ -1095,10 +1095,105 @@
             });
         }
 
+        // ==== 资产名识别 ====
+        // 产物命名：H5000M-<模组>-<YYYYMMDD>-<镜像类型>.<扩展名>
+        // 模组（MT5700 / MT5700M）与编译日期都能从文件名直接还原，
+        // 不再依赖 tag 关键字，也不再「按后缀猜类型」把杂项当固件。
+        const ASSET_RE = /^H5000M-(MT5700M|MT5700)-(\d{8})-(sysupgrade|factory|combined(?:-efi)?|image(?:-efi)?)\.(bin|itb|img\.gz|vmdk|iso)$/;
+        const LEGACY_RE = /^H5000M-(MT5700M|MT5700)-.+\.(bin|itb|img\.gz|vmdk|iso)$/;
+
+        function parseAssetName(name) {
+            const n = name || '';
+            const m = ASSET_RE.exec(n);
+            if (m) {
+                const d = m[2];
+                return {
+                    modem: m[1],
+                    date: d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8),
+                    slug: m[3],
+                    ext: m[4],
+                    primary: m[3] === 'sysupgrade',
+                    legacy: false
+                };
+            }
+            // 过渡期旧命名：仍按「机型-模组-...」识别，但不标主固件；
+            // .config.txt / .manifest / sha256sums 等杂项一律返回 null。
+            const l = LEGACY_RE.exec(n);
+            if (l) {
+                return { modem: l[1], date: '', slug: '', ext: l[2], primary: false, legacy: true };
+            }
+            return null;
+        }
+
+        // 从资产名还原模组与编译日期，给 Release 卡片补一行易读信息。
+        // tag 仍完整展示，但不再靠它判断机型/变体。
+        function releaseMetaBadge(rel) {
+            const infos = (rel.assets || []).map(a => parseAssetName(a.name)).filter(Boolean);
+            if (infos.length === 0) return '';
+            const parts = [];
+            if (infos[0].modem) parts.push('模组 ' + infos[0].modem);
+            if (infos[0].date) parts.push('编译 ' + infos[0].date);
+            parts.push('固件 ' + infos.length + ' 个');
+            return `<div class="flex flex-wrap items-center gap-2">${parts.map(x => `<span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">${escapeHtml(x)}</span>`).join('')}</div>`;
+        }
+
+        // 只渲染可直接刷写的完整固件；主固件（sysupgrade）高亮并排在最前，
+        // 其余镜像照常列出，杂项资产不再占用卡片。
+        function renderAssetList(rel) {
+            const items = (rel.assets || [])
+                .map(a => ({ asset: a, info: parseAssetName(a.name) }))
+                .filter(x => x.info);
+            if (items.length === 0) {
+                return `<p class="text-xs text-slate-500 py-3">本 Release 暂无可识别的完整固件（可能仍在上传，或已被每日清理移除）。</p>`;
+            }
+            const primary = items.find(x => x.info.primary);
+            return `<div class="grid grid-cols-1 gap-2.5">` + items.map(({ asset, info }) => {
+                const isPrimary = !!primary && asset === primary.asset;
+                const dlUrl = formatDownloadUrl(asset.browser_download_url);
+                const label = isPrimary ? '主固件' : (info.slug || (info.legacy ? '旧命名' : '镜像'));
+                const labelClass = isPrimary
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : 'bg-sky-100 text-sky-700 border-sky-200';
+                const meta = [formatBytes(asset.size)];
+                if (info.modem) meta.push('模组 ' + info.modem);
+                if (info.date) meta.push('编译 ' + info.date);
+                if (info.legacy) meta.push('旧命名');
+                meta.push('下载 ' + asset.download_count);
+                return `
+                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border ${isPrimary ? 'border-emerald-300' : 'border-slate-200'} hover:border-sky-300 transition-all">
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <div class="w-9 h-9 rounded-xl ${isPrimary ? 'bg-emerald-100 text-emerald-600' : 'bg-sky-100 text-sky-600'} flex items-center justify-center shrink-0">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                        </div>
+                                        <div class="min-w-0">
+                                            <p class="text-xs sm:text-sm font-mono font-bold text-slate-900 truncate flex items-center gap-2" title="${escapeHtml(asset.name)}">
+                                                <span class="shrink-0 px-1.5 py-0.5 rounded-md border text-[10px] font-bold ${labelClass}">${label}</span>
+                                                <span class="truncate">${escapeHtml(asset.name)}</span>
+                                            </p>
+                                            <div class="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                                                ${meta.map(m => `<span>${escapeHtml(m)}</span>`).join('<span>·</span>')}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <button onclick="copyText('${dlUrl}', '已复制${currentDownloadMode === 'proxy' ? '加速' : ''}下载链接')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all" title="复制下载链接">
+                                            复制链接
+                                        </button>
+                                        <a href="${dlUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2 rounded-xl ${isPrimary ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-800 hover:bg-slate-900'} text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                            <span>${currentDownloadMode === 'proxy' ? '极速下载' : '直接下载'}</span>
+                                        </a>
+                                    </div>
+                                </div>
+                                `;
+            }).join('') + `</div>`;
+        }
+
         // 异步获取 GitHub Releases 固件
         async function fetchReleases() {
-            const container = document.getElementById('releases-container');
-            const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases`;
+            // per_page=100 避免未来同时存在多套模组/多次构建时被默认 30 条截断。
+            const apiUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=100`;
 
             try {
                 const response = await fetch(apiUrl, {
@@ -1110,11 +1205,13 @@
                 }
 
                 const releases = await response.json();
+                if (!Array.isArray(releases)) throw new Error('GitHub API 返回数据格式异常');
                 latestReleasesData = releases;
                 renderReleases(releases);
             } catch (err) {
-                console.warn('获取 Release 异常，加载友好 fallback 界面:', err);
-                renderFallbackBuildStatus();
+                console.warn('获取 Release 异常:', err);
+                // 区分「云端 API 失败」与「构建中暂无 Release」，都给出可重试入口
+                renderFallbackBuildStatus(err && err.message ? err.message : '未知错误');
             }
         }
 
@@ -1158,60 +1255,9 @@
 
                     <!-- 固件文件列表 -->
                     <div class="mt-6 space-y-3">
-                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">固件文件 (${rel.assets ? rel.assets.length : 0})</h4>
-                        
-                        ${rel.assets && rel.assets.length > 0 ? `
-                        <div class="grid grid-cols-1 gap-2.5">
-                            ${rel.assets.map(asset => {
-                                const dlUrl = formatDownloadUrl(asset.browser_download_url);
-                                const nameLower = asset.name.toLowerCase();
-                                // 资产识别：与 WRT-CORE 的「机型-模组插件-编译日期」命名保持一致
-                                const isFirmware = nameLower.endsWith('.bin') || nameLower.endsWith('.img.gz');
-                                const isConfig = nameLower.endsWith('.config.txt') || nameLower.startsWith('config-');
-                                const isManifest = nameLower.endsWith('.manifest');
-                                const isChecksum = /\.(sha256|sha256sums|sha512)$/.test(nameLower);
-                                const kindLabel = isFirmware ? '固件' : isConfig ? '配置' : isManifest ? '清单' : isChecksum ? '校验' : '文件';
-                                const kindClass = isFirmware ? 'bg-sky-100 text-sky-700 border-sky-200'
-                                    : isConfig ? 'bg-amber-100 text-amber-700 border-amber-200'
-                                    : isManifest ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                                    : 'bg-slate-100 text-slate-600 border-slate-200';
-                                const sizeStr = formatBytes(asset.size);
-
-                                return `
-                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-sky-300 transition-all">
-                                    <div class="flex items-center gap-3 min-w-0">
-                                        <div class="w-9 h-9 rounded-xl ${isFirmware ? 'bg-sky-100 text-sky-600' : isConfig ? 'bg-amber-100 text-amber-600' : isManifest ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'} flex items-center justify-center shrink-0">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                        </div>
-                                        <div class="min-w-0">
-                                            <p class="text-xs sm:text-sm font-mono font-bold text-slate-900 truncate flex items-center gap-2" title="${escapeHtml(asset.name)}">
-                                                <span class="shrink-0 px-1.5 py-0.5 rounded-md border text-[10px] font-bold ${kindClass}">${kindLabel}</span>
-                                                <span class="truncate">${escapeHtml(asset.name)}</span>
-                                            </p>
-                                            <div class="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                                                <span>${sizeStr}</span>
-                                                <span>·</span>
-                                                <span>下载次数: ${asset.download_count}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="flex items-center gap-2 shrink-0">
-                                        <button onclick="copyText('${dlUrl}', '已复制${currentDownloadMode === 'proxy' ? '加速' : ''}下载链接')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all" title="复制下载链接">
-                                            复制链接
-                                        </button>
-                                        <a href="${dlUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2 rounded-xl ${isFirmware ? 'bg-sky-600 hover:bg-sky-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'} text-xs font-bold transition-all shadow-sm flex items-center gap-1">
-                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                                            <span>${currentDownloadMode === 'proxy' ? '极速下载' : '直接下载'}</span>
-                                        </a>
-                                    </div>
-                                </div>
-                                `;
-                            }).join('')}
-                        </div>
-                        ` : `
-                        <p class="text-xs text-slate-500 py-3">本 Release 暂未包含附件资产。</p>
-                        `}
+                        ${releaseMetaBadge(rel)}
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider">可刷写固件 (${(rel.assets || []).filter(a => parseAssetName(a.name)).length})</h4>
+                        ${renderAssetList(rel)}
                     </div>
 
                     <!-- 说明信息 -->
@@ -1231,13 +1277,16 @@
         }
 
         // 当 Releases 正在云端编译或处于轮替清理状态时的优雅卡片
-        function renderFallbackBuildStatus() {
+        function renderFallbackBuildStatus(errorMsg) {
             const container = document.getElementById('releases-container');
-            const expectedSysupgrade = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases`;
-            const proxySysupgrade = formatDownloadUrl(expectedSysupgrade);
 
             container.innerHTML = `
             <div class="rounded-3xl p-6 sm:p-8 md:p-10 bg-slate-50/90 border border-slate-200 shadow-sm space-y-6">
+                ${errorMsg ? `
+                <div class="rounded-2xl p-4 bg-rose-50 border border-rose-200 text-xs text-rose-800">
+                    <strong>云端 Release 获取失败</strong>：${escapeHtml(errorMsg)}。可点击下方「刷新检测」重试，或直接前往 GitHub Releases 查看。
+                </div>
+                ` : ''}
                 <!-- 顶部编译进行中状态 -->
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
                     <div class="flex items-start sm:items-center gap-3.5">
@@ -1274,8 +1323,8 @@
                             <div class="flex items-center gap-2 sm:gap-3">
                                 <span class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
                                 <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.bin</p>
-                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 每日分别产出 MT5700 / MT5700M 两套（各集成模组管理/风扇温控/网络模式/TTYD/HomeProxy）</p>
+                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-&lt;模组&gt;-&lt;YYYYMMDD&gt;-sysupgrade.bin</p>
+                                    <p class="text-[11px] text-slate-400">系统在线升级包 · 每日分别产出 MT5700 / MT5700M 两套，文件名含 YYYYMMDD 编译日期（各集成模组管理/风扇温控/网络模式/TTYD/HomeProxy）</p>
                                 </div>
                             </div>
                             <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>

@@ -5,8 +5,8 @@
 # 为什么构建期生成而不是提交静态文件：升级源里「哪个 Release / 哪个资产」
 # 取决于运行期变量 —— 本仓库每次构建固定产出两套固件（WRT_MODEM=MT5700 /
 # MT5700M），Release tag 与资产名都带模组标识：
-#   tag   : MEDIATEK-WIFI-YES-VIKINGYFY-owrt-<MODEM>-<YY.MM.DD-HH.MM.SS>
-#   资产  : <device>-<MODEM>-<YY.MM.DD-HH.MM.SS>.bin
+#   tag   : MEDIATEK-WIFI-YES-VIKINGYFY-owrt-<MODEM>-<YY.MM.DD-HH.MM.SS>（格式保持不变）
+#   资产  : <device>-<MODEM>-<YYYYMMDD>-sysupgrade.bin
 # 静态文件无法同时覆盖两套，且设备型号/平台若变化也要跟着改；构建期生成
 # 则与产物一一对应。
 #
@@ -23,6 +23,11 @@
 #   rust/src/upgrade.rs             expected_sha256（自定义校验值，留空则用 Release 资产或正文里的 sha256）
 # 上游默认配置与 README 里的 enabled / keep_config 在本版本 Rust 与 rpcd 代码中
 # 均未被读取，故不写入预设，避免产生「配了却不起作用」的假象。
+#
+# SHA256 不写进预设：expected_sha256 是「本次 Release 的固定值」，出厂固化会让
+# 之后每个版本都拿旧哈希去比对。WRT-CORE 改为把每个固件的 sha256sum 写进
+# Release 正文，上游 github.rs 的 find_sha256_in_text 会按资产名自动取到，
+# 既不新增资产、也不占用 UCI 键。
 #
 # 用法（在 OpenWrt 源码树根目录，defconfig 之前由 Settings.sh 调用）：
 #   Scripts/OnlineUpgradePreset.sh
@@ -70,20 +75,25 @@ MODEL=$(grep -rhA10 "^define Device/$DEVICE_NAME$" target/linux/*/image/*.mk 2>/
 	| sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
 MODEL="${MODEL:-$DEVICE_NAME}"
 
-# 资产名规则取自 WRT-CORE「Package Firmware」：机型-模组插件-编译日期.<ext>
-# 实测：H5000M-MT5700-26.11.09-18.27.39.bin
-# 因此用「机型 + 模组标识 + 日期 + .bin」锚定：
-#   - 结尾 .bin 排除同批上传的 .manifest / *.config.txt；
+# 资产名规则取自 WRT-CORE「Package Firmware」：
+#   <机型>-<模组插件>-<YYYYMMDD>-<镜像类型>.<扩展名>
+# 实测：H5000M-MT5700-20261109-sysupgrade.bin
+# 用「机型 + 模组标识 + 纯数字日期 + 镜像类型」四段锚定：
+#   - [0-9]+ 匹配 YYYYMMDD，不再用宽松的 .*，避免把历史命名或杂项当固件；
+#   - 结尾 -sysupgrade.bin 精确指向主固件，排除 .manifest / .config.txt
+#     与 kernel.bin / rootfs.* 等散件；
 #   - 模组标识两侧都带连字符，MT5700 的正则不会命中 MT5700M
 #     （后者是 -MT5700M-，最后一个字符是 M，不构成 -MT5700-）。
-PATTERN="^${MODEL}-${WRT_MODEM}-.*\.bin\$"
+PATTERN="^${MODEL}-${WRT_MODEM}-[0-9]+-sysupgrade\\.bin\$"
 
 # tag 语义来自 rust/src/github.rs：latest 取最新 Release，latest@<正则>
 # 只在 tag 名匹配该正则的 Release 里找最新。这里按「配置-来源-分支-模组」
 # 归组，保证 MT5700 固件不会从 MT5700M 组里取错产物（同理反向）。
+# 分支名可能含点（如 openwrt-24.10），正则里 . 是通配符，需转义成 \. 。
 # 缺 WRT_INFO / WRT_BRANCH（本地手跑）时退化为只按模组过滤，仍不会跨模组。
-if [ -n "$WRT_INFO" ] && [ -n "$WRT_BRANCH" ]; then
-	TAG_PREFIX="${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_MODEM}-"
+BRANCH_RE="${WRT_BRANCH//./\\.}"
+if [ -n "$WRT_INFO" ] && [ -n "$BRANCH_RE" ]; then
+	TAG_PREFIX="${WRT_CONFIG}-${WRT_INFO}-${BRANCH_RE}-${WRT_MODEM}-"
 else
 	TAG_PREFIX="${WRT_MODEM}-"
 fi
@@ -119,6 +129,21 @@ for KV in "repo '${UPGRADE_REPO}'" "tag '${TAG}'" "firmware_pattern '${PATTERN}'
 		exit 1
 	}
 done
+
+# 正则自检：构造示例产物名 / 示例标签，确认两条规则真能命中，
+# 避免上游 Regex::new 编译失败或锚点写错导致设备端 OTA 找不到固件。
+SAMPLE="${MODEL}-${WRT_MODEM}-20261109-sysupgrade.bin"
+if [[ ! "$SAMPLE" =~ $PATTERN ]]; then
+	echo "::error::firmware_pattern 未匹配示例产物 ${SAMPLE}（规则=${PATTERN}）"
+	exit 1
+fi
+if [ -n "$WRT_INFO" ] && [ -n "$BRANCH_RE" ]; then
+	SAMPLE_TAG="${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_MODEM}-26.11.09-18.27.39"
+	if [[ ! "$SAMPLE_TAG" =~ ${TAG#latest@} ]]; then
+		echo "::error::tag 正则未匹配示例标签 ${SAMPLE_TAG}（规则=${TAG}）"
+		exit 1
+	fi
+fi
 
 echo "==> 在线升级预设：配置=${WRT_CONFIG} 设备=${PLATFORM}/${DEVICE_NAME} 模组=${WRT_MODEM}"
 echo "    tag=${TAG}"

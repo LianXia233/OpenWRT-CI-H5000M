@@ -110,13 +110,27 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 
 ### 固件命名规则
 
-Release 只收集可刷写固件，统一按 `机型-模组插件-编译日期` 命名，两套固件靠模组字段精确隔离：
-- `H5000M-MT5700-<时间>.bin`
-- `H5000M-MT5700M-<时间>.bin`
+Release 只发布可直接刷写的完整固件，统一按 `机型-模组插件-编译日期[-镜像类型].扩展名` 命名：
+- `H5000M-MT5700-20261109-sysupgrade.bin`
+- `H5000M-MT5700M-20261109-sysupgrade.bin`
 
-`manifest`、`.config` 等辅助文件不再随 Release 发布。
+| 字段 | 来源 | 说明 |
+|:---|:---|:---|
+| 机型 | `DEVICE_MODEL`（解析不到时退回设备名） | 固定为 `H5000M` |
+| 模组插件 | `WRT_MODEM` | `MT5700` / `MT5700M`，两套插件独占同一 AT 串口，靠该字段精确隔离 |
+| 编译日期 | `WRT_DATE_SHORT` | `YYYYMMDD`，与 `WRT_DATE` 由同一次 `date` 取出，避免跨零点不一致 |
+| 镜像类型 | 产物文件名剥离平台/设备前缀后的 `IMG_SLUG` | 白名单 `sysupgrade` / `factory` / `combined(-efi)` / `image(-efi)`；必须保留，避免同次构建多个镜像互相覆盖 |
 
-机型取自 OpenWrt 设备定义中的 `DEVICE_MODEL`（解析不到时退回设备名），日期为构建时间（`YY.MM.DD-HH.MM.SS`，CST）。
+**非固件文件过滤**：`Package Firmware` 改为按镜像类型白名单精确挑选，只把完整固件搬进 `upload/`；
+`manifest`、`.config.txt`、`kernel.bin`、`rootfs.*`、`buildinfo`、`sha256sums` 等散件留在 `bin/targets`
+随 `make clean` 回收。发布前还有一道自检（`upload` 非空且每个文件命中固件文件名白名单），
+`softprops/action-gh-release` 的 `files` 也只列白名单 glob，双闸门杜绝杂项。
+
+**SHA256 校验**：`Package Firmware` 用 `sha256sum *` 生成标准格式校验表写入 Release 正文，
+`luci-app-online-upgrade` v2 的 `find_sha256_in_text` 会按资产名逐行取到，OTA 下载后真正比对完整性。
+不新增 `*.sha256` 资产、也不写死 UCI 的 `expected_sha256`（该值每次构建都变）。
+
+Release 标签格式保持不变：`<配置名>-<owner>-<分支>-<模组>-<YY.MM.DD-HH.MM.SS>`。
 
 ---
 
@@ -135,12 +149,15 @@ Release 只收集可刷写固件，统一按 `机型-模组插件-编译日期` 
 
 | 机型 | `repo` | `tag` | `firmware_pattern` |
 |:---|:---|:---|:---|
-| `MT5700` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700-` | `^H5000M-MT5700-.*\.bin$` |
-| `MT5700M` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700M-` | `^H5000M-MT5700M-.*\.bin$` |
+| `MT5700` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700-` | `^H5000M-MT5700-[0-9]+-sysupgrade\.bin$` |
+| `MT5700M` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700M-` | `^H5000M-MT5700M-[0-9]+-sysupgrade\.bin$` |
 
 - `90-online-upgrade-auto` 的存在性守卫：上游 `98a966a`（2026-11-08）已改为 `[ -x /usr/bin/online-upgrade ]`，不再引用 v1 的 `online-upgrade.sh`。本仓库按内容判定——仅当检测到 v1 路径时才改写，上游已修复则跳过；无论是否改写都断言最终代码行引用 v2 路径（注释中的历史说明不计入判定），并核对三处路径一致。
 - `tag` 的 `latest@<正则>` 语义取自 `rust/src/github.rs`：只在 tag 名匹配该正则的 Release 里取最新，因此 `MT5700` 不会拿到 `MT5700M` 的产物；模组标识两侧都带连字符，`-MT5700-` 不会匹配 `-MT5700M-`（反向同理）。
-- `firmware_pattern` 结尾锚定 `.bin`，排除同批上传的 `.manifest` 与 `.config.txt`。
+- `firmware_pattern` 用 `[0-9]+` 锚定 `YYYYMMDD` 编译日期、以 `-sysupgrade.bin` 精确指向主固件，不再用宽松的 `.*`，避免把历史命名或散件当固件。
+- `tag` 前缀按「配置-来源-分支-模组」四段锚定，分支名中的点会转义成 `\.`（如 `openwrt-24.10`），防止换源码分支时跨分支取最新；预设脚本还会用示例产物名与示例标签做正则命中自检，写错即让构建失败。
+- SHA256 不在预设里写死：`expected_sha256` 留空，校验值由 Release 正文的标准 `sha256sum` 行提供。
+- 已知限制：上游 `version::pick` 在资产名中找不到点分版本时会回退到 Release 标签，标签末尾的 `HH.MM.SS` 可能被当作版本号；本次按既定决定不改标签格式，OTA 的版本显示可能不等于编译日期，但下载与校验不受影响。
 - 预设只写入代码真正读取的键：`repo`、`tag`、`proxy`、`firmware_pattern`、`min_size_mb`、`expected_sha256`、`dl_workers`、`dl_chunk_mb`、`dl_stall_sec`、`dl_retries`（section 为 `online-upgrade.settings`）。上游默认配置里的 `enabled` 与 `keep_config` 在本版本 Rust 与 rpcd 代码中均未被读取，故不写入，避免"配了却不起作用"。
 
 ### Rust 后端编译方式

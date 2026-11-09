@@ -2,6 +2,56 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-10] 同步产物命名、非固件过滤、SHA256 校验与落地页资产识别
+
+### 背景
+
+- 本仓库此前已把产物改为「机型-模组插件-编译日期」，但日期用 `YY.MM.DD-HH.MM.SS`、
+  无镜像类型后缀，与 `H5000M-CI-Qmodem` 仓库最终统一的 `<机型>-<模组插件>-<YYYYMMDD>[-镜像类型].<扩展名>` 不一致。
+- `Package Firmware` 仍按「设备名 + 扩展名」粗筛，散件可能混入；Release 侧 `files: ./wrt/upload/*.*`
+  仍是全量发布，无发布前自检与白名单闸门。
+- Release 正文没有 SHA256，设备端 OTA 的完整性校验实际裸奔；预设里的 `expected_sha256` 为空且每次构建都变，
+  不适合写死。
+- 下载页按后缀把 `.config.txt` / `.manifest` 等所有资产都渲染成卡片，且硬编码旧日期格式说明。
+
+### 变更
+
+- **`.github/workflows/WRT-CORE.yml`**
+  - `Initialization Values` 新增 `WRT_DATE_SHORT`（`YYYYMMDD`），与 `WRT_DATE` 由同一次 `date` 取出；
+    `WRT_DATE` 继续用于 Release 标签，**标签格式保持不变**。
+  - `Package Firmware` 改为按 `IMG_SLUG` 白名单（`sysupgrade` / `factory` / `combined(-efi)` / `image(-efi)`）
+    精确挑选完整固件，命名 `H5000M-<模组>-<YYYYMMDD>-<镜像类型>.<扩展名>`；
+    `EXT` 用 `cut -d '.' -f 2-` 保留 `img.gz` 这类双段扩展名（旧写法 `${FILE##*.}` 会截成 `gz`）；
+    产物名冲突直接报错而非静默覆盖。
+  - 新增发布前自检：`upload` 非空且每个文件命中固件文件名白名单；`Release files` 改为同一组白名单 glob，双闸门。
+  - 自检后用 `sha256sum *` 生成标准格式校验表写入 `WRT_SHA256_TABLE`，追加到 Release 正文，
+    由上游 `find_sha256_in_text` 按资产名取用，不新增任何资产。
+- **`Scripts/OnlineUpgradePreset.sh`**
+  - `firmware_pattern` 改为 `^H5000M-<模组>-[0-9]+-sysupgrade\.bin$`，四段锚定新命名。
+  - `tag` 前缀保持「配置-来源-分支-模组」四段，并把分支名中的点转义成 `\.`（如 `openwrt-24.10`）。
+  - 新增示例产物名与示例标签的正则命中自检，规则写错即让构建失败。
+  - 注释说明 SHA256 由 Release 正文提供，不在预设里写死。
+- **`index.html`**
+  - 新增 `parseAssetName()`，从资产名解析模组（MT5700 / MT5700M）、编译日期与镜像类型，不再依赖后缀猜测或 tag 关键字。
+  - 只渲染可刷写的完整固件，主固件 `-sysupgrade` 高亮，`.config.txt` / `.manifest` 等杂项不再展示。
+  - `fetchReleases()` 改 `per_page=100`；云端失败时显示具体错误原因与重试入口（保留「编译中」占位，
+    因为本仓库 `Auto-Clean` 每天清空 Release，该占位是有效状态而非死链）。
+  - 命名速查、刷机教程与预期发布清单全面改用 `H5000M-<模组>-<YYYYMMDD>-sysupgrade.bin`，
+    并补充 Release 正文提供 SHA256 的校验提示。
+- **`README.md`**：重写命名规则章节，补充非固件过滤、SHA256 校验来源、tag 分支转义与版本解析已知限制。
+
+### 现有 Release
+
+- 1 个存量 Release 一并按新规则生效：固件资产重命名为 `H5000M-MT5700-20261109-sysupgrade.bin`，
+  删除 `.config.txt` 与 `.manifest` 两个非固件资产，正文用 `asset.digest` 补齐 SHA256 校验块（免下载、幂等）。
+
+### 验证
+
+- YAML `yaml.safe_load`、`bash -n`、index.html 内嵌 JS 语法检查通过；两套模组 OTA 预设模拟与边界分支通过；
+  5 个改动文件统一 LF 换行（CR=0）。
+- 端到端核验：Release 正文校验块结构与幂等、上游 `find_sha256_in_text` 等价取用、OTA tag/pattern 命中与跨模组隔离、
+  落地页资产名解析、下载端点 302。
+
 ## [2026-11-10] Release 仅收集固件文件
 
 - `Package Firmware` 不再把 `.config.txt` 与 `.manifest` 放进 Release：
