@@ -832,6 +832,15 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
                         <span>🌐 GitHub 官方源直连</span>
                     </button>
+                    <!-- 壁纸控制抽屉开关 -->
+                    <button id="toggleWallpaperMenu" title="调节壁纸透视与毛玻璃" class="p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-white transition-colors flex items-center gap-1 text-xs font-semibold">
+                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                        <span class="hidden md:inline">壁纸</span>
+                    </button>
+                    <!-- 一键纯享壁纸 -->
+                    <button id="btnZenMode" title="一键纯享壁纸" class="p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-white transition-colors" onclick="toggleZenMode()">
+                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    </button>
                 </div>
             </div>
 
@@ -852,20 +861,20 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">*-sysupgrade.bin</span>
+                        <span class="font-mono font-bold text-slate-900 text-xs">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.bin</span>
                         <p class="text-slate-600 mt-0.5"><strong>系统升级包（最常用）</strong>：已刷入 OpenWRT/ImmortalWrt 系统后，在 LuCI 网页后台「系统 -> 备份/升级」直接上传更新并保留配置。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">*-factory.bin</span>
-                        <p class="text-slate-600 mt-0.5"><strong>原厂/底包直刷包</strong>：用于通过 U-Boot Web 恢复页面或原厂特权刷机模式首次刷入 OpenWrt 底层系统。</p>
+                        <span class="font-mono font-bold text-slate-900 text-xs">*.manifest</span>
+                        <p class="text-slate-600 mt-0.5"><strong>软件包与内核清单</strong>：记录该固件内置的内核版本与全部 luci/kmod 包，便于核对版本差异。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">Config-*.txt</span>
+                        <span class="font-mono font-bold text-slate-900 text-xs">*.config.txt</span>
                         <p class="text-slate-600 mt-0.5"><strong>构建配置文件清单</strong>：记录该版本的全量内核与插件配置参数，方便比对差异或本地自编译复现。</p>
                     </div>
                     <div class="p-2.5 rounded-xl bg-white/80 border border-sky-100">
-                        <span class="font-mono font-bold text-slate-900 text-xs">manifest / sha256</span>
-                        <p class="text-slate-600 mt-0.5"><strong>校验与软件包列表</strong>：包含固件的 SHA256 安全哈希校验码，确保下载固件未被破坏或篡改。</p>
+                        <span class="font-mono font-bold text-slate-900 text-xs">机型-模组插件-编译日期</span>
+                        <p class="text-slate-600 mt-0.5"><strong>统一命名规则</strong>：机型固定为 H5000M，模组标识区分 MT5700 / MT5700M，日期格式 <code class="font-mono">YY.MM.DD-HH.MM.SS</code>（CST），下载时请认准模组字段。</p>
                     </div>
                 </div>
             </div>
@@ -885,7 +894,7 @@
                     <span class="absolute top-5 right-5 text-4xl font-black text-slate-200 font-mono">01</span>
                     <h3 class="text-lg font-bold text-slate-900 mb-2">获取并校验固件</h3>
                     <p class="text-xs text-slate-600 leading-relaxed space-y-2">
-                        1. 从上方「固件下载」区选择对应版本的 <code class="font-mono text-sky-700 bg-sky-50 px-1 py-0.5 rounded">sysupgrade.bin</code> 固件。<br>
+                        1. 从上方「固件下载」区选择对应模组（MT5700 / MT5700M）的 <code class="font-mono text-sky-700 bg-sky-50 px-1 py-0.5 rounded">H5000M-*.bin</code> 固件，先确认文件名中的模组标识与设备一致。<br>
                         2. 推荐启用 <strong class="text-slate-800">ACG2 极速代理</strong>，国内千兆满速直下。<br>
                         3. 校验下载文件的完整性，防止因网络波动导致文件损坏。
                     </p>
@@ -1155,18 +1164,30 @@
                         <div class="grid grid-cols-1 gap-2.5">
                             ${rel.assets.map(asset => {
                                 const dlUrl = formatDownloadUrl(asset.browser_download_url);
-                                const isBin = asset.name.endsWith('.bin') || asset.name.endsWith('.img.gz');
-                                const isConfig = asset.name.startsWith('Config');
+                                const nameLower = asset.name.toLowerCase();
+                                // 资产识别：与 WRT-CORE 的「机型-模组插件-编译日期」命名保持一致
+                                const isFirmware = nameLower.endsWith('.bin') || nameLower.endsWith('.img.gz');
+                                const isConfig = nameLower.endsWith('.config.txt') || nameLower.startsWith('config-');
+                                const isManifest = nameLower.endsWith('.manifest');
+                                const isChecksum = /\.(sha256|sha256sums|sha512)$/.test(nameLower);
+                                const kindLabel = isFirmware ? '固件' : isConfig ? '配置' : isManifest ? '清单' : isChecksum ? '校验' : '文件';
+                                const kindClass = isFirmware ? 'bg-sky-100 text-sky-700 border-sky-200'
+                                    : isConfig ? 'bg-amber-100 text-amber-700 border-amber-200'
+                                    : isManifest ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                                    : 'bg-slate-100 text-slate-600 border-slate-200';
                                 const sizeStr = formatBytes(asset.size);
 
                                 return `
                                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-sky-300 transition-all">
                                     <div class="flex items-center gap-3 min-w-0">
-                                        <div class="w-9 h-9 rounded-xl ${isBin ? 'bg-sky-100 text-sky-600' : isConfig ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-600'} flex items-center justify-center shrink-0">
+                                        <div class="w-9 h-9 rounded-xl ${isFirmware ? 'bg-sky-100 text-sky-600' : isConfig ? 'bg-amber-100 text-amber-600' : isManifest ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'} flex items-center justify-center shrink-0">
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                         </div>
                                         <div class="min-w-0">
-                                            <p class="text-xs sm:text-sm font-mono font-bold text-slate-900 truncate" title="${escapeHtml(asset.name)}">${escapeHtml(asset.name)}</p>
+                                            <p class="text-xs sm:text-sm font-mono font-bold text-slate-900 truncate flex items-center gap-2" title="${escapeHtml(asset.name)}">
+                                                <span class="shrink-0 px-1.5 py-0.5 rounded-md border text-[10px] font-bold ${kindClass}">${kindLabel}</span>
+                                                <span class="truncate">${escapeHtml(asset.name)}</span>
+                                            </p>
                                             <div class="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
                                                 <span>${sizeStr}</span>
                                                 <span>·</span>
@@ -1179,7 +1200,7 @@
                                         <button onclick="copyText('${dlUrl}', '已复制${currentDownloadMode === 'proxy' ? '加速' : ''}下载链接')" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-all" title="复制下载链接">
                                             复制链接
                                         </button>
-                                        <a href="${dlUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2 rounded-xl ${isBin ? 'bg-sky-600 hover:bg-sky-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'} text-xs font-bold transition-all shadow-sm flex items-center gap-1">
+                                        <a href="${dlUrl}" target="_blank" rel="noopener noreferrer" class="px-4 py-2 rounded-xl ${isFirmware ? 'bg-sky-600 hover:bg-sky-700 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'} text-xs font-bold transition-all shadow-sm flex items-center gap-1">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                             <span>${currentDownloadMode === 'proxy' ? '极速下载' : '直接下载'}</span>
                                         </a>
@@ -1251,20 +1272,9 @@
                     <div class="grid grid-cols-1 gap-2.5">
                         <div class="p-3.5 rounded-2xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div class="flex items-center gap-2 sm:gap-3">
-
-                    <!-- 壁纸控制抽屉开关 -->
-                    <button id="toggleWallpaperMenu" title="调节壁纸透视与毛玻璃" class="p-1.5 sm:p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-slate-100/80 transition-colors flex items-center gap-1 text-xs font-semibold border border-slate-200/80 bg-white/70 shadow-sm">
-                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-                        <span class="hidden md:inline">壁纸</span>
-                    </button>
-                    <!-- 一键纯享壁纸 -->
-                    <button id="btnZenMode" title="一键纯享壁纸" class="p-1.5 sm:p-2 rounded-xl text-slate-600 hover:text-sky-600 hover:bg-slate-100/80 transition-colors border border-slate-200/80 bg-white/70 shadow-sm" onclick="toggleZenMode()">
-                        <svg class="w-4 h-4 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                    </button>
-
                                 <span class="w-8 h-8 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
                                 <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">openwrt-mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade.bin</p>
+                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.bin</p>
                                     <p class="text-[11px] text-slate-400">系统在线升级包 · 每日分别产出 MT5700 / MT5700M 两套（各集成模组管理/风扇温控/网络模式/TTYD/HomeProxy）</p>
                                 </div>
                             </div>
@@ -1273,10 +1283,10 @@
 
                         <div class="p-3.5 rounded-2xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div class="flex items-center gap-3">
-                                <span class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold font-mono">BIN</span>
+                                <span class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold font-mono">TXT</span>
                                 <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">openwrt-mediatek-filogic-hiveton_h5000m-squashfs-factory.bin</p>
-                                    <p class="text-[11px] text-slate-400">底层初次刷机固件包 · 适用于 U-Boot 救砖与首次刷入</p>
+                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.manifest</p>
+                                    <p class="text-[11px] text-slate-400">软件包与内核清单 · 记录本次固件内置的内核版本与全部 luci/kmod 包</p>
                                 </div>
                             </div>
                             <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 self-start sm:self-center">编译完毕即刻发布</span>
@@ -1286,7 +1296,7 @@
                             <div class="flex items-center gap-3">
                                 <span class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold font-mono">TXT</span>
                                 <div>
-                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">Config-MEDIATEK-WIFI-YES-VIKINGYFY-owrt-{MT5700|MT5700M}-*.txt</p>
+                                    <p class="text-xs sm:text-sm font-mono font-bold text-slate-900">H5000M-{MT5700|MT5700M}-&lt;日期&gt;.config.txt</p>
                                     <p class="text-[11px] text-slate-400">完整编译 .config 清单 · 包含所有选中的 kmod 与 luci 扩展包</p>
                                 </div>
                             </div>

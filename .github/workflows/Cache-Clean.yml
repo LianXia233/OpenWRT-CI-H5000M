@@ -24,4 +24,21 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Cache Clean
-        run: gh cache delete --all
+        run: |
+          # 只清理同一缓存前缀下的旧条目，始终保留每个前缀最新的一份。
+          # 此前 `gh cache delete --all` 会在每周清理后把次日构建变成冷编译，
+          # 冷编译实测 4 小时以上，极易触发 300 分钟编译预算超时（exit 124）。
+          # 未被使用的缓存 GitHub 会在 7 天后自动回收，无需整库清空。
+          ids=$(gh cache list --limit 100 --json id,key,createdAt \
+            --jq 'sort_by((.key | sub("-[^-]+$"; "")), .createdAt)
+                  | group_by((.key | sub("-[^-]+$"; "")))
+                  | map(.[0:-1]) | add // []
+                  | .[].id')
+          if [ -z "$ids" ]; then
+            echo "没有需要清理的旧缓存，保留现有最新缓存用于增量编译。"
+            exit 0
+          fi
+          for id in $ids; do
+            echo "删除旧缓存：$id"
+            gh cache delete "$id"
+          done
