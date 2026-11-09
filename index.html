@@ -16,7 +16,7 @@
   </script>
 
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Hiveton H5000M 5G CPE 定制固件 | 基于 ImmortalWrt & MediaTek Filogic</title>
     <meta name="description" content="专为联发科 Filogic 平台与鼎桥 MT5700M 5G CPE 路由器打造的高性能全功能定制固件，基于 ImmortalWrt 主线源码构建，支持 GitHub Actions 全自动云端构建。">
     <meta name="keywords" content="OpenWRT, ImmortalWrt, Hiveton H5000M, MT5700M, 5G CPE, Filogic, 联发科, 锁频, 智能温控, GitHub Actions, 固件下载">
@@ -229,7 +229,283 @@
             }
         }
 
-    </style>
+    /* ============================================================
+   Phase 3 移动端落地补丁 · A = h5000m.html (OpenWRT-CI-H5000M)
+   注入位置：本文件最后一个 style 结束标签之前，新建【独立】块，
+             不要插进现有 @media (max-width:640px) 块内部。
+   约束：全部规则包在 max-width:640px 内 -> >=641px 零影响；
+         仅 640 / 360 两个宽度断点；纯 CSS，幂等，自包含；
+         A 依赖 Tailwind CDN，一律用 !important / 属性选择器 / 更高特异性覆盖。
+   ============================================================ */
+
+@media (max-width: 640px) {
+
+  /* ---- 1. 兜底与安全区 ---- */
+  /* A 原 body 无 overflow-x:hidden，此处补齐兜底（保留 body 壁纸 background-image） */
+  body {
+    overflow-x: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* ---- 2. 顶栏 56px / 隐藏桌面 nav / 品牌短名 ---- */
+  header.glass-nav nav { display: none !important; }
+  header.glass-nav div[class*="h-16"] {
+    height: 56px !important;
+    min-height: 56px !important;
+  }
+  header.glass-nav [class*="text-lg"] { font-size: 16px !important; }
+  header.glass-nav [class*="hidden"][class*="sm:block"] { display: none !important; }
+
+  /* ---- 3. 字号阶梯（Phase 1） ---- */
+  h1 {
+    font-size: clamp(26px, 7vw, 34px) !important;
+    line-height: 1.25 !important;
+  }
+  h2 {
+    font-size: clamp(20px, 5.2vw, 24px) !important;
+    line-height: 1.3 !important;
+  }
+  main p[class*="text-base"] {
+    font-size: clamp(14px, 3.8vw, 16px) !important;
+    line-height: 1.6 !important;
+  }
+
+  /* ---- 4. 中文断行（弃 break-all，balance，隐藏标题硬 br） ---- */
+  h1, h2, h3 {
+    word-break: normal !important;
+    line-break: strict;
+    overflow-wrap: break-word;
+    text-wrap: balance;
+  }
+  h1 br, h2 br { display: none !important; }
+  /* 可选 HTML 包裹词组（见 meta.json htmlReplacements），>640 不生效 */
+  .nowrap { white-space: nowrap !important; }
+  p, li, span {
+    word-break: normal !important;
+    overflow-wrap: break-word;
+  }
+
+  /* ---- 5. 正文阅读宽度（Phase 1: min(32ch,100%) / 左对齐 / 1.6） ---- */
+  main p[class*="text-base"],
+  main section > p[class*="text-sm"] {
+    max-width: min(32ch, 100%) !important;
+    text-align: left !important;
+    line-height: 1.6 !important;
+  }
+
+  /* ---- 6. 首屏：徽章 2 列 + CTA 2+1 网格 ---- */
+  /* A 徽章容器：<div class="flex flex-wrap items-center gap-2.5 mb-9">（唯一） */
+  main div[class*="gap-2.5"][class*="mb-9"] {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  main div[class*="gap-2.5"][class*="mb-9"] > * {
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+    white-space: normal !important;
+  }
+  /* A CTA 容器：<div class="flex flex-col sm:flex-row ...">，首个子元素为 a[href="#downloads"] */
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) > a {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    font-size: 14px !important;
+  }
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) > a:first-child {
+    grid-column: 1 / -1 !important;
+    min-height: 48px !important;
+  }
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) > a:not(:first-child) {
+    min-height: 44px !important;
+  }
+
+  /* ---- 7. 首屏：参数卡改单行横滚 + scroll-snap ---- */
+  section#specs > div[class*="lg:grid-cols-4"] {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 12px !important;
+    max-width: 100%;
+    min-width: 0;
+    padding-bottom: 6px;
+  }
+  section#specs > div[class*="lg:grid-cols-4"] > div {
+    flex: 0 0 min(78vw, 280px) !important;
+    min-width: 0;
+    scroll-snap-align: start;
+  }
+
+  /* ---- 8. 溢出与横向滚动容器 ---- */
+  div[style*="overflow-x:auto"],
+  div[class*="overflow-x-auto"] {
+    max-width: 100% !important;
+    min-width: 0;
+    overflow-x: auto !important;
+    overscroll-behavior-x: contain;
+  }
+  /* A 的下载模式横向 tab：<div class="... overflow-x-auto custom-scrollbar"> */
+  /* 关键：底色用 background-color（非 background 简写），
+     这样右侧渐隐「滚动提示」的 background-image 不会被擦除。 */
+  div[class*="custom-scrollbar"] {
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    background-color: rgba(226, 232, 240, 0.7) !important;
+    background-image: linear-gradient(90deg,
+        rgba(226, 232, 240, 0) calc(100% - 26px),
+        rgba(226, 232, 240, 0.96) 100%) !important;
+  }
+  div[class*="custom-scrollbar"] > * {
+    scroll-snap-align: start;
+    flex-shrink: 0;
+  }
+  code, pre {
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  pre { white-space: pre-wrap !important; }
+
+  /* ---- 9. 触控目标 >=44px / 输入 16px / range 44px 热区 ---- */
+  main button,
+  header button,
+  .wallpaper-control-panel button,
+  #mobile-menu-btn,
+  header #mobile-menu a,
+  main a[class*="rounded-xl"],
+  main a[class*="rounded-2xl"],
+  main a[class*="rounded-lg"],
+  footer a {
+    min-height: 44px !important;
+    min-width: 44px !important;
+    max-width: 100%;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+  /* 句内纯文字链（如「访问 ↗」「192.168.10.1」）：inline 元素上
+     min-height 无效，用 padding 扩大热区；不改 display，避免覆盖响应式隐藏。 */
+  a[class*="underline"]:not([class*="rounded"]),
+  a:not([class]) {
+    padding-top: 15px !important;
+    padding-bottom: 15px !important;
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+    min-height: 44px !important;
+    min-width: 44px !important;
+    box-sizing: border-box !important;
+  }
+  input:not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+    min-height: 44px !important;
+    max-width: 100%;
+    box-sizing: border-box !important;
+  }
+  /* 44px 热区但保留原生 8px 视觉轨道：border-box + content-box 背景裁剪 */
+  input[type="range"] {
+    min-height: 44px !important;
+    padding-top: 18px !important;
+    padding-bottom: 18px !important;
+    box-sizing: border-box !important;
+    background-clip: content-box !important;
+    -webkit-background-clip: content-box !important;
+    touch-action: pan-y;
+  }
+
+  /* ---- 10. <=10px 小字提到 12px（含 JS 动态渲染的 text-[10px]） ---- */
+  [class*="text-[10px]"],
+  [style*="font-size:10px"] {
+    font-size: 12px !important;
+  }
+
+  /* ---- 11. 卡片/区块间距（Phase 1: 卡片 16 / 区块 20 / 组 12） ---- */
+  main section.glass-card-white {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+
+  /* ---- 12. 毛玻璃 blur 12px ----
+     注意：刻意【不】覆盖 .glass-card-* 的 background-color，
+     A 的 opacitySlider 通过 el.style.backgroundColor 动态调节透光度，
+     此处加 !important 会打断该 JS；背景相关一律只用 background-color 非简写。 */
+  .glass-card-white,
+  .glass-card-light,
+  .glass-nav {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+
+  /* ---- 13. 锚点 / 浮动工具避让 / a11y ---- */
+  #downloads {
+    scroll-margin-top: calc(64px + env(safe-area-inset-top));
+  }
+  .wallpaper-control-panel {
+    top: calc(68px + env(safe-area-inset-top)) !important;
+    max-height: calc(100dvh - 80px - env(safe-area-inset-top));
+    overflow-y: auto;
+  }
+  #toast {
+    bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid #0284c7 !important;
+    outline-offset: 2px;
+  }
+}
+
+/* ---- 并列追加：降低动效（自带 640 条件，>=641 零影响） ---- */
+@media (max-width: 640px) and (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- 并列追加：横屏隐藏浮动工具，避免遮挡内容 ---- */
+@media (max-width: 640px) and (orientation: landscape) {
+  .wallpaper-control-panel { display: none !important; }
+  #toast { bottom: calc(8px + env(safe-area-inset-bottom)); }
+}
+
+/* ---- 最后并列追加：360 单列降级 ---- */
+@media (max-width: 360px) {
+  main div[class*="gap-2.5"][class*="mb-9"] {
+    grid-template-columns: 1fr !important;
+  }
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) {
+    grid-template-columns: 1fr !important;
+  }
+  main div[class*="flex-col"][class*="sm:flex-row"]:has(> a[href="#downloads"]) > a:first-child {
+    grid-column: auto !important;
+  }
+  section#specs > div[class*="lg:grid-cols-4"] > div {
+    flex-basis: min(86vw, 280px) !important;
+  }
+}
+</style>
 </head>
 <body class="flex flex-col min-h-screen relative selection:bg-sky-500 selection:text-white">
 
@@ -415,7 +691,7 @@
                 <!-- 大标题 -->
                 <h1 class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 tracking-tight leading-[1.15] mb-5">
                     Hiveton H5000M <br class="hidden sm:inline">
-                    <span class="gradient-text-blue">全功能 5G CPE 定制固件</span>
+                    <span class="gradient-text-blue"><span class="nowrap">全功能</span> <span class="nowrap">5G CPE</span> 定制固件</span>
                 </h1>
 
                 <!-- 详细副标题 -->
