@@ -4,9 +4,9 @@
 #
 # 为什么构建期生成而不是提交静态文件：升级源里「哪个 Release / 哪个资产」
 # 取决于运行期变量 —— 本仓库每次构建固定产出两套固件（WRT_MODEM=MT5700 /
-# MT5700M），Release tag 与资产名都带模组标识（实测 2026-11-07 产物）：
+# MT5700M），Release tag 与资产名都带模组标识：
 #   tag   : MEDIATEK-WIFI-YES-VIKINGYFY-owrt-<MODEM>-<YY.MM.DD-HH.MM.SS>
-#   资产  : <platform>-<device>-squashfs-sysupgrade-<SOURCE>-<BRANCH>-wifi-yes-<MODEM>-<date>.bin
+#   资产  : <device>-<MODEM>-<YY.MM.DD-HH.MM.SS>.bin
 # 静态文件无法同时覆盖两套，且设备型号/平台若变化也要跟着改；构建期生成
 # 则与产物一一对应。
 #
@@ -64,19 +64,14 @@ fi
 PLATFORM="${DEVICE_SYM%%_DEVICE_*}"
 PLATFORM="${PLATFORM#DEVICE_}"
 DEVICE_NAME="${DEVICE_SYM##*_DEVICE_}"
-# OpenWrt 产物把 target 与 subtarget 用连字符连接（mediatek_filogic → mediatek-filogic）
-TARGET_DASH="${PLATFORM//_/-}"
 
-# 资产名规则取自 WRT-CORE「Package Firmware」：
-#   NEW_FILE = <固件基名去掉 immortalwrt 前缀> - WRT_INFO - WRT_BRANCH -
-#              WRT_WIFI - WRT_MODEM - WRT_DATE . <EXT>
-# 实测：mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade-
-#       VIKINGYFY-owrt-wifi-yes-MT5700-26.11.07-11.58.26.bin
-# 因此用「平台 + 设备 + 任意镜像类型 + 模组标识 + 日期 + .bin」锚定：
-#   - 结尾 .bin 排除同批上传的 .manifest / Config-*.txt；
+# 资产名规则取自 WRT-CORE「Package Firmware」：机型-模组插件-编译日期.<ext>
+# 实测：hiveton_h5000m-MT5700-26.11.09-18.27.39.bin
+# 因此用「机型 + 模组标识 + 日期 + .bin」锚定：
+#   - 结尾 .bin 排除同批上传的 .manifest / *.config.txt；
 #   - 模组标识两侧都带连字符，MT5700 的正则不会命中 MT5700M
 #     （后者是 -MT5700M-，最后一个字符是 M，不构成 -MT5700-）。
-PATTERN="^${TARGET_DASH}-${DEVICE_NAME}-.*-${WRT_MODEM}-.*\.bin\$"
+PATTERN="^${DEVICE_NAME}-${WRT_MODEM}-.*\.bin\$"
 
 # tag 语义来自 rust/src/github.rs：latest 取最新 Release，latest@<正则>
 # 只在 tag 名匹配该正则的 Release 里找最新。这里按「配置-来源-分支-模组」

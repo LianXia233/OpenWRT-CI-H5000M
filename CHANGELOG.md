@@ -2,6 +2,34 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-10] Release 固件产物统一为「机型-模组插件-编译日期」
+
+### 背景
+
+旧命名把平台、子平台、来源、分支、无线模式、模组、日期全部拼进文件名，例如
+`mediatek-filogic-hiveton_h5000m-squashfs-sysupgrade-VIKINGYFY-owrt-wifi-yes-MT5700-26.11.09-18.27.39.bin`。
+其中只有「模组 / 日期」会变，其余全是固定信息，两套变体的名字仅中段一个字段不同，既冗长又难区分。
+
+### 变更
+
+- **`WRT-CORE.yml`**：
+  - `Initialization Values` 新增 `WRT_DEVICE`，从 `Config/<方案>.txt` 的
+    `CONFIG_TARGET_*_DEVICE_*=y` 解析机型（`MULTI_PROFILE` 两种写法均支持）。
+  - `Package Firmware` 统一按 `机型-模组插件-编译日期.<ext>` 命名固件与 manifest，
+    如 `hiveton_h5000m-MT5700-26.11.09-18.27.39.bin`；配置归档同步为
+    `<同前缀>.config.txt`。重命名循环改用 `find -print0` + `read -d ''`，避免文件名
+    含空格时被拆词。不再使用的 `WRT_WIFI` 一并移除。
+- **`Scripts/OnlineUpgradePreset.sh`**：`firmware_pattern` 同步收敛为
+  `^<机型>-<模组>-.*\.bin$`，保证在线升级仍能精确命中新命名的产物。
+- **README**：更新「固件命名规则」与「在线升级插件与机型预设」表中的
+  `firmware_pattern` 示例。
+
+### 验证
+
+- workflow YAML 解析通过，`Package Firmware` 的 run 块 `bash -n` 通过。
+- 用仓库现有 `Config/MEDIATEK-WIFI-YES.txt` 复算：`WRT_DEVICE=hiveton_h5000m`；
+  `MT5700` / `MT5700M` 两个模组分别得到互不匹配的 `firmware_pattern`。
+
 ## [2026-11-09] Rust 插件编译提速：官方 SDK 为唯一来源 + 全量 cargo 缓存
 
 ### 背景

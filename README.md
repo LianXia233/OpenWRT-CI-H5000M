@@ -110,9 +110,12 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 
 ### 固件命名规则
 
-编译产物在 Release 中以固件方案精确隔离：
-- `H5000M-owrt-MT5700-<时间>-sysupgrade.bin`
-- `H5000M-owrt-MT5700M-<时间>-sysupgrade.bin`
+编译产物在 Release 中统一按 `机型-模组插件-编译日期` 命名，两套固件靠模组字段精确隔离：
+- `hiveton_h5000m-MT5700-<时间>.bin`
+- `hiveton_h5000m-MT5700M-<时间>.bin`
+- 同前缀的辅助文件：`*.manifest`、`*.config.txt`
+
+机型取自 `Config/<方案>.txt` 中的目标设备符号，日期为构建时间（`YY.MM.DD-HH.MM.SS`，CST）。
 
 ---
 
@@ -131,12 +134,12 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 
 | 机型 | `repo` | `tag` | `firmware_pattern` |
 |:---|:---|:---|:---|
-| `MT5700` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700-` | `^mediatek-filogic-hiveton_h5000m-.*-MT5700-.*\.bin$` |
-| `MT5700M` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700M-` | `^mediatek-filogic-hiveton_h5000m-.*-MT5700M-.*\.bin$` |
+| `MT5700` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700-` | `^hiveton_h5000m-MT5700-.*\.bin$` |
+| `MT5700M` 固件 | `LianXia233/OpenWRT-CI-H5000M` | `latest@^MEDIATEK-WIFI-YES-VIKINGYFY-owrt-MT5700M-` | `^hiveton_h5000m-MT5700M-.*\.bin$` |
 
 - `90-online-upgrade-auto` 的存在性守卫：上游 `98a966a`（2026-11-08）已改为 `[ -x /usr/bin/online-upgrade ]`，不再引用 v1 的 `online-upgrade.sh`。本仓库按内容判定——仅当检测到 v1 路径时才改写，上游已修复则跳过；无论是否改写都断言最终代码行引用 v2 路径（注释中的历史说明不计入判定），并核对三处路径一致。
 - `tag` 的 `latest@<正则>` 语义取自 `rust/src/github.rs`：只在 tag 名匹配该正则的 Release 里取最新，因此 `MT5700` 不会拿到 `MT5700M` 的产物；模组标识两侧都带连字符，`-MT5700-` 不会匹配 `-MT5700M-`（反向同理）。
-- `firmware_pattern` 结尾锚定 `.bin`，排除同批上传的 `.manifest` 与 `Config-*.txt`。
+- `firmware_pattern` 结尾锚定 `.bin`，排除同批上传的 `.manifest` 与 `.config.txt`。
 - 预设只写入代码真正读取的键：`repo`、`tag`、`proxy`、`firmware_pattern`、`min_size_mb`、`expected_sha256`、`dl_workers`、`dl_chunk_mb`、`dl_stall_sec`、`dl_retries`（section 为 `online-upgrade.settings`）。上游默认配置里的 `enabled` 与 `keep_config` 在本版本 Rust 与 rpcd 代码中均未被读取，故不写入，避免"配了却不起作用"。
 
 ### Rust 后端编译方式

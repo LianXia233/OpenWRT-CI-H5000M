@@ -256,7 +256,10 @@ jobs:
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
           echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
-          echo "WRT_WIFI=wifi-yes" >> $GITHUB_ENV
+          # 机型（OpenWrt 设备名，如 hiveton_h5000m）：产物名只用「机型-模组-日期」，
+          # 不再拼接平台/子平台/来源/分支/无线模式等固定信息。两种设备符号写法
+          # （MULTI_PROFILE=y/n）都能解析，\K 前的贪婪匹配会落到最后一个 _DEVICE_。
+          echo "WRT_DEVICE=$(grep -oP '^CONFIG_TARGET_[A-Za-z0-9_]+_DEVICE_\K[A-Za-z0-9_]+(?==y)' ./Config/$WRT_CONFIG.txt | head -1)" >> $GITHUB_ENV
           echo "WRT_KVER=none" >> $GITHUB_ENV
           echo "WRT_LIST=none" >> $GITHUB_ENV
 
@@ -1091,7 +1094,17 @@ jobs:
         run: |
           cd ./wrt/ && mkdir ./upload/
 
-          cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_MODEM"-"$WRT_DATE".txt
+          # Release 资产统一命名：机型-模组插件-编译日期.<ext>
+          # 例：hiveton_h5000m-MT5700-26.11.09-18.27.39.bin
+          # 机型取自 Config 里的目标设备符号；平台/子平台/来源/分支/无线模式都是
+          # 固定信息，不再堆进文件名，避免各变体产物只能靠中间字段区分。
+          if [ -z "${WRT_DEVICE:-}" ]; then
+            echo "::error::未能从 Config/$WRT_CONFIG.txt 解析目标设备（CONFIG_TARGET_*_DEVICE_*=y），无法生成产物名"
+            exit 1
+          fi
+          ASSET_PREFIX="${WRT_DEVICE}-${WRT_MODEM}-${WRT_DATE}"
+
+          cp -f ./.config ./upload/"$ASSET_PREFIX".config.txt
 
           if [[ $WRT_TEST != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
@@ -1099,11 +1112,12 @@ jobs:
 
             find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
 
-            for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
-              EXT=$(basename $FILE | cut -d '.' -f 2-)
-              NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
-              NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$WRT_MODEM"-"$WRT_DATE"."$EXT"
-              mv -f $FILE ./upload/$NEW_FILE
+            # 固件镜像与 manifest 共用同一前缀，仅扩展名不同（本机型只产出
+            # sysupgrade.bin，不存在同扩展名的多个镜像）。
+            find ./bin/targets/ -type f -iname "*$WRT_DEVICE*" -print0 |
+            while IFS= read -r -d '' FILE; do
+              EXT="${FILE##*.}"
+              mv -f "$FILE" "./upload/$ASSET_PREFIX.$EXT"
             done
 
             find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
