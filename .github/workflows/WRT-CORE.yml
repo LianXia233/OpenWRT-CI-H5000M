@@ -311,15 +311,6 @@ jobs:
             echo "caches missed!"
           fi
 
-          if [ "${{ steps.check-cache.outputs.cache-hit }}" != 'true' ]; then
-            CACHE_LIST=$(gh cache list --json id --key "$WRT_CONFIG-$WRT_INFO" --jq '.[].id' 2>/dev/null)
-            for CACHE_ID in $CACHE_LIST; do
-              gh cache delete "$CACHE_ID"
-            done
-
-            echo "caches cleanup done!"
-          fi
-
       - name: Update Feeds
         run: |
           cd ./wrt/
@@ -368,6 +359,11 @@ jobs:
         if: env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/package/luci-app-mt5700
+
+          # 规范化行尾与可执行权限位（防范上游 Windows 提交或 git checkout 丢失 +x）
+          find root/etc/init.d root/etc/uci-defaults root/etc/hotplug.d root/usr/libexec tests -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+          find root/etc/init.d root/etc/uci-defaults root/etc/hotplug.d root/usr/libexec -type f -exec chmod 0755 {} + 2>/dev/null || true
+          find tests -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
 
           echo "==> 结构校验（含本仓库深度适配注入）"
           # Scripts/Packages.sh 会做一处注入：src/Makefile 的预编译后端分支。
@@ -447,6 +443,11 @@ jobs:
         run: |
           cd ./wrt/package/luci-app-mt5700m
 
+          # 规范化行尾与可执行权限位
+          find luci-app-mt5700m/root tests -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+          find luci-app-mt5700m/root/etc/init.d luci-app-mt5700m/root/etc/uci-defaults luci-app-mt5700m/root/etc/hotplug.d luci-app-mt5700m/root/usr/sbin luci-app-mt5700m/root/usr/libexec -type f -exec chmod 0755 {} + 2>/dev/null || true
+          find tests luci-app-mt5700m/tests -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
+
           echo "==> Shell 语法检查"
           for SH in \
             luci-app-mt5700m/root/etc/hotplug.d/usb/60-mt5700m \
@@ -524,6 +525,11 @@ jobs:
         if: env.WRT_MODEM != 'MT5700M'
         run: |
           cd ./wrt/package/luci-app-h5000m-fancontrol
+
+          # 规范化行尾与可执行权限位
+          find root/etc/init.d root/etc/uci-defaults root/usr/sbin tests scripts -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+          find root/etc/init.d root/etc/uci-defaults root/usr/sbin -type f -exec chmod 0755 {} + 2>/dev/null || true
+          find tests scripts -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
 
           echo "==> 结构校验（含本仓库深度适配注入）"
           # Scripts/Packages.sh 会做一处注入：src/Makefile 的预编译控制器分支与

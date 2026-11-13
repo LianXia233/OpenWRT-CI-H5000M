@@ -45,7 +45,7 @@ permissions: write-all
 # CI 任务
 jobs:
   config:
-    name: ${{ matrix.CONFIG }} · ${{ matrix.MODEM }}
+    name: ${{ inputs.CONFIG }} · ${{ matrix.MODEM }}
     # 两套模组插件独占同一 AT 串口，每次构建固定各编一套固件（两个并行作业），
     # 无需在触发时选择；一套失败不影响另一套。
     strategy:

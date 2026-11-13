@@ -40,6 +40,13 @@ UPDATE_PACKAGE() {
 	elif [[ "$PKG_SPECIAL" == "name" ]]; then
 		mv -f $REPO_NAME $PKG_NAME
 	fi
+
+	# 规范化：去除 CRLF 并恢复 shell 脚本执行权限
+	local TARGET_DIR="./$PKG_NAME"
+	if [ -d "$TARGET_DIR" ]; then
+		find "$TARGET_DIR" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+		find "$TARGET_DIR" -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
+	fi
 }
 
 # 调用示例
@@ -174,6 +181,18 @@ MT5700_INFO="plugin ${MT5700_VER} / backend ${MT5700_BACKEND_VER}"
 echo "luci-app-mt5700 version: $MT5700_INFO"
 [ -n "${GITHUB_ENV:-}" ] && echo "MT5700_VERSION=$MT5700_INFO" >> "$GITHUB_ENV"
 
+# 规范化：去除 CRLF 并补齐可执行权限（防范上游 Windows 提交或 git checkout 丢失 +x）
+find "$MT5700_DIR" -type f \( -name '*.sh' -o -name '*.js' -o -name '*.json' -o -name '*.uc' -o -name 'Makefile' \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+for MT5700_EXEC in \
+	"$MT5700_DIR"/root/etc/init.d/at-webserver \
+	"$MT5700_DIR"/root/etc/uci-defaults/at-webserver \
+	"$MT5700_DIR"/root/etc/hotplug.d/iface/99-at-webserver \
+	"$MT5700_DIR"/root/etc/hotplug.d/usb/99-at-webserver \
+	"$MT5700_DIR"/root/usr/libexec/at-webserver/on-uplink.sh \
+	"$MT5700_DIR"/tests/iface/interface-selection.sh; do
+	[ -f "$MT5700_EXEC" ] && chmod 0755 "$MT5700_EXEC"
+done
+
 # ===== luci-app-mt5700m（旧插件）克隆结果校验与版本记录 =====
 # 旧插件不在本固件默认启用，但仍要保证：一旦改用 Config/MT5700M.txt，clone 出来的
 # 两个包结构完整，否则会在编译阶段才报错。
@@ -195,6 +214,26 @@ MT5700M_TRANSPORT_VER=$(sed -n 's/^PKG_VERSION:=//p' "$MT5700M_DIR/mt5700m-trans
 MT5700M_INFO="plugin ${MT5700M_VER} / transport ${MT5700M_TRANSPORT_VER}"
 echo "luci-app-mt5700m version: $MT5700M_INFO"
 [ -n "${GITHUB_ENV:-}" ] && echo "MT5700M_VERSION=$MT5700M_INFO" >> "$GITHUB_ENV"
+
+# 规范化：去除 CRLF 并补齐可执行权限
+find "$MT5700M_DIR" -type f \( -name '*.sh' -o -name '*.js' -o -name '*.json' -o -name '*.po' -o -name 'Makefile' \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+for MT5700M_EXEC in \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/sbin/mt5700m-read \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/sbin/mt5700m-traffic \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/sbin/mt5700m-manager \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/sbin/mt5700m-at \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/libexec/rpcd/mt5700m-traffic \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/init.d/mt5700m-manager \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/init.d/mt5700m-traffic \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/hotplug.d/usb/60-mt5700m \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/hotplug.d/net/95-mt5700m-traffic \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/uci-defaults/90-mt5700m \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/etc/uci-defaults/92-mt5700m-traffic \
+	"$MT5700M_DIR"/luci-app-mt5700m/root/usr/share/mt5700m/*; do
+	[ -f "$MT5700M_EXEC" ] && chmod 0755 "$MT5700M_EXEC"
+done
+find "$MT5700M_DIR" -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
 
 # ===== luci-app-h5000m-fancontrol 克隆结果校验与版本记录（2026-10-26）=====
 # 按固件分流后两套来源结构不同：新版（LianXia233）含 src/ Rust 工程与
@@ -244,6 +283,18 @@ fi
 FANCONTROL_VER=$(sed -n 's/^PKG_VERSION:=//p' "$FANCONTROL_DIR/Makefile" | head -1)
 echo "luci-app-h5000m-fancontrol version: $FANCONTROL_VER（$FANCONTROL_SOURCE，WRT_MODEM=$WRT_MODEM）"
 [ -n "${GITHUB_ENV:-}" ] && echo "H5000M_FANCONTROL_VERSION=$FANCONTROL_VER（$FANCONTROL_SOURCE）" >> "$GITHUB_ENV"
+
+# 规范化：去除 CRLF 并补齐可执行权限
+find "$FANCONTROL_DIR" -type f \( -name '*.sh' -o -name '*.js' -o -name '*.json' -o -name '*.toml' -o -name 'Makefile' \) -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+for FAN_EXEC in \
+	"$FANCONTROL_DIR"/root/etc/init.d/h5000m-fancontrol \
+	"$FANCONTROL_DIR"/root/etc/uci-defaults/91-h5000m-fancontrol-v2 \
+	"$FANCONTROL_DIR"/root/etc/uci-defaults/91-h5000m-fancontrol-v3 \
+	"$FANCONTROL_DIR"/root/usr/sbin/h5000m-fancontrol \
+	"$FANCONTROL_DIR"/root/usr/sbin/h5000m-fancontrol-status; do
+	[ -f "$FAN_EXEC" ] && chmod 0755 "$FAN_EXEC"
+done
+find "$FANCONTROL_DIR" -type f -name '*.sh' -exec chmod 0755 {} + 2>/dev/null || true
 
 # ===== 深度适配：让包在 buildroot 内使用 CI 预编译的 Rust 后端 =====
 # 固件构建阶段的 PATH 只有交叉工具链（rules.mk 里 export PATH:=$(TARGET_PATH)），

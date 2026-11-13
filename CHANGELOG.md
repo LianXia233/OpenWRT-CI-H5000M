@@ -2,6 +2,40 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-14] 修复 CI 冒烟测试脚本权限位缺失、加固脚本规范化、优化缓存与矩阵配置
+
+### 背景
+
+- Run `43345962800` 中，`MEDIATEK-WIFI-YES · MT5700 / VIKINGYFY/immortalwrt · MT5700` 作业在 `Smoke Test luci-app-mt5700` 步骤失败（exit 1），而并行的 `MT5700M` 作业成功。
+- **直接根因**：上游仓库 `LianXia233/luci-app-mt5700` 在提交 `80bdf53`（添加 SPDX 标识头）时，因跨平台提交或工具改写，意外将 `root/usr/libexec/at-webserver/on-uplink.sh` 的 git mode 从 `100755` 变成了 `100644`。runner 在 Linux 环境克隆代码后，该文件失去执行权限，致使 `Smoke Test luci-app-mt5700` 中的 `test -x root/usr/libexec/at-webserver/on-uplink.sh` 断言失败。
+- **系统性隐患**：
+  1. `Scripts/Packages.sh` 克隆软件包后未对服务脚本、配置默认脚本、热插拔与工具脚本进行统一的权限与换行规范化（此前仅在 `Packages-OnlineUpgrade.sh` 中作了单独规避），上游提交若偶发丢失 `+x` 或携带 CRLF，CI 会立刻硬性红掉或在真机运行时报 Permission denied。
+  2. `WRT-CORE.yml` 的 `Update Caches` 在 `cache-hit != true` 时，会执行 `gh cache delete` 清空匹配前缀的所有缓存。当矩阵并行执行（MT5700 与 MT5700M）或后续步骤失败时，已拉取的降级缓存会被过早摧毁且无法存入新缓存，迫使下次构建演变为超时高发的冷编译（4 小时以上）。
+  3. `Cache-Clean.yml` 的 jq 裁剪逻辑此前使用 `sub("-[^-]+$"; "")` 分组，而 `rust-*` 缓存的结构为 `rust-<lock_hash>-<rustc_rel>`，裁剪后仅去掉 release 版本而保留哈希，导致所有历史 rust 缓存被分到不同单元素组内、永久不被删除，白白积压 Actions 缓存配额。
+  4. `WRT-BUILD.yml` 的作业名 `${{ matrix.CONFIG }} · ${{ matrix.MODEM }}` 中引用了未在 matrix 声明的 `matrix.CONFIG`（应来自 `inputs.CONFIG`），导致手动编译页面作业名开头为空白。
+
+### 变更
+
+- **`Scripts/Packages.sh`**
+  - `UPDATE_PACKAGE()`：克隆并处理完成后，自动对软件包内所有 `*.sh` 去除 CRLF 并赋予 `0755` 权限。
+  - `luci-app-mt5700`、`luci-app-mt5700m` 与 `luci-app-h5000m-fancontrol` 校验通过后，补充结构化脚本权限与行尾规范化，确保 `root/etc/init.d/`、`root/etc/uci-defaults/`、`root/etc/hotplug.d/`、`root/usr/sbin/`、`root/usr/libexec/` 下脚本及 `tests/` 统一具备 `0755` 可执行位。
+- **`.github/workflows/WRT-CORE.yml`**
+  - `Smoke Test luci-app-mt5700`、`Smoke Test luci-app-mt5700m`、`Smoke Test luci-app-h5000m-fancontrol`：在校验前统一执行防御性行尾规整与 `0755` 赋权，双保险杜绝上游文件权限回退引发 CI 中断。
+  - `Update Caches`：移除 `cache-hit != true` 时激进的 `gh cache delete` 逻辑，杜绝并行任务冲突与构建失败导致的缓存误清空。
+- **`.github/workflows/Cache-Clean.yml`**
+  - 增强 `jq` 前缀判定规则（`group_prefix`）：将 `rust-*` 前缀统一定义为 `rust` 分组，保留最新一份 Rust 缓存并正常清理过期历史缓存。
+- **`.github/workflows/WRT-BUILD.yml`**
+  - 修复作业名称变量引用：`${{ matrix.CONFIG }}` 修正为 `${{ inputs.CONFIG }}`。
+- **`LianXia233/luci-app-mt5700`**
+  - 向上游提交修复（`cab7a6a`）：将 `root/usr/libexec/at-webserver/on-uplink.sh` git mode 恢复为 `100755`。
+
+### 验证
+
+- `LianXia233/luci-app-mt5700` 仓库已确认 `root/usr/libexec/at-webserver/on-uplink.sh` 为 `100755`；
+- 本地 `bash -n` 校验 `Scripts/Packages.sh` 语法正确；
+- 模拟测试 `Cache-Clean.yml` jq 分组逻辑，确认旧 `rust-*` 缓存能够被正确识别清理并保留最新缓存；
+- 模拟执行 `Smoke Test` 赋权与行尾清洗命令，确认幂等性与执行安全性。
+
 ## [2026-11-10] 同步产物命名、非固件过滤、SHA256 校验与落地页资产识别
 
 ### 背景

@@ -29,9 +29,12 @@ jobs:
           # 此前 `gh cache delete --all` 会在每周清理后把次日构建变成冷编译，
           # 冷编译实测 4 小时以上，极易触发 300 分钟编译预算超时（exit 124）。
           # 未被使用的缓存 GitHub 会在 7 天后自动回收，无需整库清空。
+          # 对于 rust-* 缓存，其 key 结构为 rust-<lock_hash>-<rustc_rel>，
+          # 需统一归入 rust 前缀以正确保留最新一份并清理历史失效条目。
           ids=$(gh cache list --limit 100 --json id,key,createdAt \
-            --jq 'sort_by((.key | sub("-[^-]+$"; "")), .createdAt)
-                  | group_by((.key | sub("-[^-]+$"; "")))
+            --jq 'def group_prefix: if .key | startswith("rust-") then "rust" else (.key | sub("-[^-]+$"; "")) end;
+                  sort_by(group_prefix, .createdAt)
+                  | group_by(group_prefix)
                   | map(.[0:-1]) | add // []
                   | .[].id')
           if [ -z "$ids" ]; then
