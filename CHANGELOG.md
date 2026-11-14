@@ -2,6 +2,25 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-14] CI：全面适配 Ubuntu 26.04 runner
+
+### 背景
+
+GitHub 自 2026-10-19 起把 `ubuntu-latest` 滚动迁移到 Ubuntu 26.04（预计 11-19 完成）。
+上游 `init_build_environment.sh` 的 `check_system()` 代号白名单只到 `noble`，
+26.04（`resolute`）会直接报 `[ERROR] Unsupported OS, use Ubuntu 20.04 instead.`
+并退出，导致全部编译作业停在初始化阶段。
+
+### 改动
+
+- 全部 `runs-on` 统一显式指定 `ubuntu-26.04`：迁移期内 `ubuntu-latest` 仍可能落到
+  24.04，显式标签才能保证三个仓库行为一致。
+- 新增 `.github/scripts/patch-init-env.py`：下载上游脚本后注入兼容补丁，把脚本内
+  `VERSION_CODENAME` 由 `resolute` 映射为 `noble`，复用上游已验证的 GCC 13 /
+  LLVM 23 / noble PPA 参数集；主 apt 源仍使用 runner 的 26.04 原生配置。
+  补丁幂等，上游原生支持 26.04 后自动跳过。
+- apt 镜像探测的代号兜底由 `noble` 改为 `resolute`。
+
 ## [2026-11-14] 修复 CI 冒烟测试脚本权限位缺失、加固脚本规范化、优化缓存与矩阵配置
 
 ### 背景

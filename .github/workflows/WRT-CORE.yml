@@ -72,10 +72,10 @@ env:
 jobs:
   core:
     name: ${{inputs.WRT_SOURCE}} · ${{inputs.WRT_MODEM || 'MT5700'}}
-    # 固定 runner 镜像：ubuntu-latest 将于 2026-10-19 起迁移到 Ubuntu 26.04，
-    # 而 immortalwrt 初始化脚本与部分 host 依赖尚未适配，迁移会造成编译中断。
-    # 固定到 ubuntu-24.04 保证可复现构建（需更新镜像时只需改这一处）。
-    runs-on: ubuntu-24.04
+    # 统一使用 Ubuntu 26.04（ubuntu-latest 自 2026-10-19 起滚动迁移到 26.04，
+    # 显式写 ubuntu-26.04 可避免迁移期内落到 24.04 造成三个仓库行为不一致）。
+    # 上游 init_build_environment.sh 不认 26.04 代号，已在初始化步骤注入兼容补丁。
+    runs-on: ubuntu-26.04
     # 兜底上限：缓存命中时正常构建约 40 分钟。2026-11-06 事故中 apt 下载退化把 job 拖到
     # 2.5 小时，最终 runner 被环境回收、日志也没能上传（job 日志端点返回 404），只能靠猜。
     # 显式收束可让异常在可观测的时间窗内以失败告终，并保留日志。
@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Free Up Disk Space
-        # GitHub ubuntu-latest runner 根盘预装 dotnet/android-sdk/ghc 等占用约 25GB，
+        # GitHub ubuntu-26.04 runner 根盘预装 dotnet/android-sdk/ghc 等占用约 25GB，
         # filogic 全量编译 + ccache 需要 30GB 以上，先清理与编译无关的预装件。
         # 这些目录不影响 apt 与构建工具链，runner 为一次性环境，删除安全。
         run: |
@@ -126,7 +126,7 @@ jobs:
           # 代号取自 runner 镜像：runner 升级后若目标 404，两边都测到 0，判定退回
           # 「保持默认」，属安全降级而非误切换。
           . /etc/os-release 2>/dev/null || true
-          IDX="dists/${VERSION_CODENAME:-noble}/universe/binary-amd64/Packages.xz"
+          IDX="dists/${VERSION_CODENAME:-resolute}/universe/binary-amd64/Packages.xz"
           AZ=$(probe "http://azure.archive.ubuntu.com/ubuntu/${IDX}")
           ALT=$(probe "https://archive.ubuntu.com/ubuntu/${IDX}")
           AZ=${AZ:-0}
@@ -227,6 +227,9 @@ jobs:
               fi
               wc -c /tmp/init_build_environment.sh
             fi
+            # 上游 check_system() 的代号白名单只到 noble，26.04 会直接 exit 1；
+            # 注入兼容补丁，把脚本内代号映射为已验证的 noble 参数集（补丁幂等）。
+            python3 "$GITHUB_WORKSPACE/.github/scripts/patch-init-env.py"
             # sudo 在前，让 timeout 与脚本拉起的 apt 同属一个进程组（原因见 apt_retry 注释）
             if sudo -E timeout --kill-after=30 900 bash /tmp/init_build_environment.sh; then
               INIT_OK=1
