@@ -144,7 +144,34 @@ if [ -n "$WRT_INFO" ] && [ -n "$BRANCH_RE" ]; then
 	fi
 fi
 
+# ---- 固件版本标记：自动注入 /etc/online-upgrade/firmware-version ----
+# luci-app-online-upgrade 读取它作为本机固件版本的强依据（basis_score 85 起），
+# 避免只用构建时间/过期锚点推断而显示「判定依据较弱」。内容 YY.MM.DD 与
+# Release tag、资产名同源；每天构建自动更新，即「自动升版」，无需人工改版本号。
+# 三仓库变量名不统一：本仓库/Qmodem 导出 WRT_DATE_DOT，OpenWRT-CI 导出 WRT_DATE_SHORT。
+# 这里逐个尝试并校验 YY.MM.DD 形状，都缺失时按 UTC+8 现算兜底。
+FW_VERSION=""
+for cand in "${WRT_DATE_DOT:-}" "${WRT_DATE_SHORT:-}" "$(TZ=UTC-8 date +'%y.%m.%d')"; do
+	case "$cand" in
+		[0-9][0-9].[0-9][0-9].[0-9][0-9]) FW_VERSION="$cand"; break ;;
+	esac
+done
+if [ -z "$FW_VERSION" ]; then
+	echo "::error::无法生成固件版本标记（期望 YY.MM.DD），停止构建"
+	exit 1
+fi
+FW_MARKER_DIR="./files/etc/online-upgrade"
+FW_MARKER="$FW_MARKER_DIR/firmware-version"
+mkdir -p "$FW_MARKER_DIR"
+printf '%s\n' "$FW_VERSION" > "$FW_MARKER"
+# 自检：标记文件必须存在且内容恰为版本号，否则红掉而不是带坏标记编译。
+[ "$(cat "$FW_MARKER")" = "$FW_VERSION" ] || {
+	echo "::error::${FW_MARKER} 写入失败或内容不符（期望 ${FW_VERSION}）"
+	exit 1
+}
+
 echo "==> 在线升级预设：配置=${WRT_CONFIG} 设备=${PLATFORM}/${DEVICE_NAME} 模组=${WRT_MODEM}"
 echo "    tag=${TAG}"
 echo "    tag_rule=${TAG_RULE}"
 echo "    firmware_pattern=${PATTERN}"
+echo "    固件版本标记=${FW_MARKER} = ${FW_VERSION}"

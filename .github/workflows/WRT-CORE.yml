@@ -603,6 +603,15 @@ jobs:
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
+          # 固件版本标记必须在编译前落盘：插件靠它拿到强依据，
+          # 内容与本次 WRT_DATE_DOT（YY.MM.DD）一致，随固件刷新。
+          FW_MARKER=./files/etc/online-upgrade/firmware-version
+          if [ ! -f "$FW_MARKER" ] || [ "$(cat "$FW_MARKER")" != "$WRT_DATE_DOT" ]; then
+            echo "::error::$FW_MARKER 缺失或与编译日期 $WRT_DATE_DOT 不一致"
+            cat "$FW_MARKER" 2>/dev/null || true
+            exit 1
+          fi
+
           # 目标设备校验（防止 Profile 静默回退到 DEFAULT_PROFILE）
           # 「Target Profile」是单选 choice：MULTI_PROFILE=n 时生效符号为
           # CONFIG_TARGET_<target>_DEVICE_xxx；若 .config 未正确选中设备，
