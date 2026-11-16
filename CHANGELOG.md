@@ -2,6 +2,13 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-17] 三仓库统一在线升级规则：独立 tag_rule + 统一产物命名
+
+### 改动
+
+- `Scripts/OnlineUpgradePreset.sh`：`tag=latest` + 独立 `tag_rule=^<TAG_PREFIX>`；产物正则改为 `<机型>-<模组>-<架构>-<YY.MM.DD>-sysupgrade.bin`；自检键数 10 → 11。
+- `.github/workflows/WRT-CORE.yml`：新增 `WRT_ARCH=aarch64` 与点分日期 `WRT_DATE_DOT`；打包统一为 `<机型>-<模组>-<架构>-<YY.MM.DD>-<类型>.<ext>`。
+
 ## [2026-11-14] CI：全面适配 Ubuntu 26.04 runner
 
 ### 背景

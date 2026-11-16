@@ -75,29 +75,27 @@ MODEL=$(grep -rhA10 "^define Device/$DEVICE_NAME$" target/linux/*/image/*.mk 2>/
 	| sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
 MODEL="${MODEL:-$DEVICE_NAME}"
 
-# 资产名规则取自 WRT-CORE「Package Firmware」：
-#   <机型>-<模组插件>-<YYYYMMDD>-<镜像类型>.<扩展名>
-# 实测：H5000M-MT5700-20261109-sysupgrade.bin
-# 用「机型 + 模组标识 + 纯数字日期 + 镜像类型」四段锚定：
-#   - [0-9]+ 匹配 YYYYMMDD，不再用宽松的 .*，避免把历史命名或杂项当固件；
-#   - 结尾 -sysupgrade.bin 精确指向主固件，排除 .manifest / .config.txt
-#     与 kernel.bin / rootfs.* 等散件；
-#   - 模组标识两侧都带连字符，MT5700 的正则不会命中 MT5700M
-#     （后者是 -MT5700M-，最后一个字符是 M，不构成 -MT5700-）。
-PATTERN="^${MODEL}-${WRT_MODEM}-[0-9]+-sysupgrade\\.bin\$"
+# 资产名规则取自 WRT-CORE「Package Firmware」（v2.7 三仓库统一）：
+#   <机型>-<模组插件>-<架构>-<YY.MM.DD>-<镜像类型>.<扩展名>
+# 实测：H5000M-MT5700-aarch64-26.11.16-sysupgrade.bin
+# 用「机型 + 模组 + 架构 + 点分日期 + 镜像类型」锚定：
+#   - 架构段声明架构，供升级插件 compat 判定（缺了只能判未声明）；
+#   - 点分日期是日期型版本，供 version::pick 比较新旧；
+#   - 模组标识两侧带连字符，MT5700 正则不会命中 MT5700M。
+WRT_ARCH="${WRT_ARCH:-aarch64}"
+PATTERN="^${MODEL}-${WRT_MODEM}-${WRT_ARCH}-[0-9.]+-sysupgrade\\.bin\$"
 
-# tag 语义来自 rust/src/github.rs：latest 取最新 Release，latest@<正则>
-# 只在 tag 名匹配该正则的 Release 里找最新。这里按「配置-来源-分支-模组」
-# 归组，保证 MT5700 固件不会从 MT5700M 组里取错产物（同理反向）。
-# 分支名可能含点（如 openwrt-24.10），正则里 . 是通配符，需转义成 \. 。
-# 缺 WRT_INFO / WRT_BRANCH（本地手跑）时退化为只按模组过滤，仍不会跨模组。
+# v2.7 统一规则：TAG 追踪模式与过滤正则解耦（与另两个 CI 仓库一致）。
+#   tag      = latest
+#   tag_rule = ^<TAG_PREFIX>
 BRANCH_RE="${WRT_BRANCH//./\\.}"
 if [ -n "$WRT_INFO" ] && [ -n "$BRANCH_RE" ]; then
 	TAG_PREFIX="${WRT_CONFIG}-${WRT_INFO}-${BRANCH_RE}-${WRT_MODEM}-"
 else
 	TAG_PREFIX="${WRT_MODEM}-"
 fi
-TAG="latest@^${TAG_PREFIX}"
+TAG_RULE="^${TAG_PREFIX}"
+TAG='latest'
 
 mkdir -p "$(dirname "$TARGET")"
 {
@@ -105,6 +103,7 @@ mkdir -p "$(dirname "$TARGET")"
 	printf 'config online-upgrade %s\n' "'settings'"
 	printf "\toption repo '%s'\n" "$UPGRADE_REPO"
 	printf "\toption tag '%s'\n" "$TAG"
+	printf "\toption tag_rule '%s'\n" "$TAG_RULE"
 	printf "\toption firmware_pattern '%s'\n" "$PATTERN"
 	printf "\toption min_size_mb '15'\n"
 	printf "\toption proxy 'https://gh.acg2.mom/'\n"
@@ -117,13 +116,13 @@ mkdir -p "$(dirname "$TARGET")"
 
 # 生成后自检：10 个键一个不少，且关键项与推导值一致。
 # 任何一项不匹配都说明模板被改坏，直接红掉而不是带着坏预设编译。
-EXPECT_KEYS=10
+EXPECT_KEYS=11
 GOT_KEYS=$(grep -c '^[[:space:]]*option ' "$TARGET" || true)
 if [ "$GOT_KEYS" -ne "$EXPECT_KEYS" ]; then
 	echo "::error::${TARGET} 生成异常：期望 ${EXPECT_KEYS} 个 option，实际 ${GOT_KEYS}"
 	exit 1
 fi
-for KV in "repo '${UPGRADE_REPO}'" "tag '${TAG}'" "firmware_pattern '${PATTERN}'"; do
+for KV in "repo '${UPGRADE_REPO}'" "tag '${TAG}'" "tag_rule '${TAG_RULE}'" "firmware_pattern '${PATTERN}'"; do
 	grep -qF "option ${KV}" "$TARGET" || {
 		echo "::error::${TARGET} 的 ${KV} 与推导值不一致"
 		exit 1
@@ -132,19 +131,20 @@ done
 
 # 正则自检：构造示例产物名 / 示例标签，确认两条规则真能命中，
 # 避免上游 Regex::new 编译失败或锚点写错导致设备端 OTA 找不到固件。
-SAMPLE="${MODEL}-${WRT_MODEM}-20261109-sysupgrade.bin"
+SAMPLE="${MODEL}-${WRT_MODEM}-${WRT_ARCH}-26.11.09-sysupgrade.bin"
 if [[ ! "$SAMPLE" =~ $PATTERN ]]; then
 	echo "::error::firmware_pattern 未匹配示例产物 ${SAMPLE}（规则=${PATTERN}）"
 	exit 1
 fi
 if [ -n "$WRT_INFO" ] && [ -n "$BRANCH_RE" ]; then
 	SAMPLE_TAG="${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_MODEM}-26.11.09-18.27.39"
-	if [[ ! "$SAMPLE_TAG" =~ ${TAG#latest@} ]]; then
-		echo "::error::tag 正则未匹配示例标签 ${SAMPLE_TAG}（规则=${TAG}）"
+	if [[ ! "$SAMPLE_TAG" =~ $TAG_RULE ]]; then
+		echo "::error::tag_rule 正则未匹配示例标签 ${SAMPLE_TAG}（规则=${TAG_RULE}）"
 		exit 1
 	fi
 fi
 
 echo "==> 在线升级预设：配置=${WRT_CONFIG} 设备=${PLATFORM}/${DEVICE_NAME} 模组=${WRT_MODEM}"
 echo "    tag=${TAG}"
+echo "    tag_rule=${TAG_RULE}"
 echo "    firmware_pattern=${PATTERN}"

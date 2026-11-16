@@ -260,6 +260,10 @@ jobs:
           WRT_NOW="$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S:%Y%m%d")"
           echo "WRT_DATE=${WRT_NOW%%:*}" >> $GITHUB_ENV
           echo "WRT_DATE_SHORT=${WRT_NOW##*:}" >> $GITHUB_ENV
+          # v2.7 三仓库统一：资产名用点分日期 YY.MM.DD（与 Tag 同源）+ 架构段，
+          # 供 luci-app-online-upgrade 识别日期型版本与架构。
+          echo "WRT_DATE_DOT=$(TZ=UTC-8 date +"%y.%m.%d")" >> $GITHUB_ENV
+          echo "WRT_ARCH=aarch64" >> $GITHUB_ENV
           echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
           echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
@@ -1120,8 +1124,9 @@ jobs:
           WRT_MODEL=$(grep -rhA10 "^define Device/$WRT_DEVICE$" target/linux/*/image/*.mk 2>/dev/null \
             | sed -n 's/^[[:space:]]*DEVICE_MODEL[[:space:]]*:=[[:space:]]*//p' | head -1)
           WRT_MODEL="${WRT_MODEL:-$WRT_DEVICE}"
-          ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_DATE_SHORT}"
-          echo "产物前缀：$ASSET_PREFIX（设备 ${WRT_DEVICE}）"
+          # v2.7 三仓库统一：<机型>-<模组>-<架构>-<YY.MM.DD>-<类型>.<ext>
+          ASSET_PREFIX="${WRT_MODEL}-${WRT_MODEM}-${WRT_ARCH}-${WRT_DATE_DOT}"
+          echo "产物前缀：$ASSET_PREFIX（设备 ${WRT_DEVICE}，架构 ${WRT_ARCH}）"
 
           if [[ $WRT_TEST != 'true' ]]; then
             echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
