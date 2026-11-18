@@ -101,54 +101,94 @@ jobs:
           df -h / /mnt 2>/dev/null || true
 
       - name: Select Apt Mirror
-        # runner 镜像内置 /etc/apt/apt-mirrors.txt：azure.archive.ubuntu.com(priority:1) →
-        # archive.ubuntu.com(priority:2) → security.ubuntu.com(priority:3)。apt 只按优先级
-        # 取第一个可用镜像，慢但没报错时不会自动降级。2026-11-06 事故就是 azure 镜像吞吐
-        # 骤降到几十 kB/s，上游 init_build_environment.sh 需要下载约 661 MB 依赖，
-        # 步骤被拖到 1.5~2.5 小时直至 runner 失联、日志未上传。
-        # 这里按实测吞吐在两者之间切换；吞吐正常时不改变任何现有配置。
+        # runner 的 /etc/apt/apt-mirrors.txt 决定 apt 实际下载源，apt 只按优先级取第一个
+        # 「可用」镜像，慢但没报错时不会自动降级。历史事故：2026-11-06 azure 退化到几十
+        # kB/s；2026-11-18（本 run）上游 699 MB 依赖下载被拖到 60 分钟步骤超时。
+        #
+        # 2026-11-18 根因：旧逻辑探测 azure 与 archive 两个「候选」，判定 azure 快
+        # （实测 154 MB/s）便「保持默认」。但 runner 实际生效的源既不是 azure 也不是
+        # archive，而是 /etc/apt/sources.list.d 里硬编码的 us-east-2.ec2.archive.ubuntu.com
+        # （见 apt 输出 Hit:2 http://us-east-2.ec2.archive.ubuntu.com/...）。这个真正在
+        # 下载的源从未被探测——它 bulk 只有约 200 kB/s（79 MB 的 texlive-lang-greek
+        # 走 4 分钟），而探测的两个候选快得毫无参考价值。
+        #
+        # 修复：探测「实际生效源」本身，而不是猜它可能是谁。从 sources 配置解析出当前
+        # host，连同公共候选一起测；只有在实际源本身退化、且备用源明显更快时才切换。
         timeout-minutes: 5
         run: |
-          # 测速必须带真实体积：原来探的是 1.76 MB 的 noble-updates/main/Packages.gz，
-          # 小文件测的是连接建立而不是持续吞吐。本仓库 run 124 的实测输出：
-          #   apt 镜像实测吞吐（字节/秒）：azure=45627172 archive=1045578
-          # 探测把 azure 判成快 44 倍、正确地保留默认；而几分钟后同一个 azure 下
-          # bulk .deb 只有约 50 kB/s（texlive-binaries 8.5 MB 走掉 3 分钟）。
-          # 小文件探测不只是测不出退化，它会主动把慢镜像选进来。
-          # 改用 universe 的 Packages.xz（15.0 MB，apt 自己就要下载），配合 Range
-          # 只取前 8 MB：50 kB/s 时 8 MB 要 160 秒，必然超过 --max-time 而现形。
+          # 测速必须带真实体积：小文件测的是连接建立而不是持续吞吐，会把慢源误判成快源。
+          # 用 universe 的 Packages.xz（15 MB，apt 自己就要下载），Range 只取前 8 MB：
+          # 200 kB/s 时 8 MB 要 40 秒，max-time 25 秒必然超时并现形为 0。
           probe() {
             local sp
             sp=$(curl -sSL -r 0-8388607 -o /dev/null --connect-timeout 10 --max-time 25 \
               -w '%{speed_download}' "$1" 2>/dev/null || true)
             echo "${sp:-0}" | cut -d. -f1
           }
-          # 代号取自 runner 镜像：runner 升级后若目标 404，两边都测到 0，判定退回
-          # 「保持默认」，属安全降级而非误切换。
           . /etc/os-release 2>/dev/null || true
           IDX="dists/${VERSION_CODENAME:-resolute}/universe/binary-amd64/Packages.xz"
-          AZ=$(probe "http://azure.archive.ubuntu.com/ubuntu/${IDX}")
-          ALT=$(probe "https://archive.ubuntu.com/ubuntu/${IDX}")
-          AZ=${AZ:-0}
-          ALT=${ALT:-0}
-          echo "apt 批量吞吐实测（字节/秒）：azure=${AZ} archive=${ALT}"
 
-          # 判定：azure 低于 300 kB/s 视为退化，且备用镜像至少快一倍、自身也达到 300 kB/s
-          # 才切换，避免在两边都慢时把配置改坏。
-          if [ "$AZ" -lt 300000 ] && [ "$ALT" -ge $((AZ * 2)) ] && [ "$ALT" -ge 300000 ]; then
-            echo "azure 镜像吞吐低于阈值，切换为 archive.ubuntu.com 优先"
+          # 解析 apt 实际生效的 Ubuntu 镜像 host：deb822(.sources) 的 URIs: 或经典
+          # sources.list 的 http(s) URL。去重后逐个探测，覆盖 runner 换区域的情况。
+          CUR_HOST=$(grep -rhoE 'https?://[^ /[:space:]]+/ubuntu/?' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list \
+            2>/dev/null | sed 's#/$##' | grep -vE 'security\.ubuntu\.com' | sort -u | head -1 || true)
+          echo "apt 实际生效源：${CUR_HOST:-未识别}"
+
+          measure() {
+            local url="$1" sp
+            sp=$(probe "${url%/}/${IDX}")
+            echo "${sp:-0}"
+          }
+          CUR_SP=0
+          if [ -n "$CUR_HOST" ]; then
+            CUR_SP=$(measure "$CUR_HOST")
+          fi
+          AZ=$(measure "http://azure.archive.ubuntu.com/ubuntu")
+          ALT=$(measure "https://archive.ubuntu.com/ubuntu")
+          echo "apt 批量吞吐实测（字节/秒）：当前实际源=${CUR_SP} azure=${AZ} archive=${ALT}"
+
+          # 健康线 1 MB/s：init 脚本单次 900s 要下约 699 MB，低于 ~800 kB/s 必然超时；
+          # 取 1 MB/s 留余量。探测用 8 MB Range，约 8 秒即可判定，不拖慢本步骤。
+          THRESH=1048576
+          # 判定围绕「实际源」展开：实际源低于阈值视为退化。优先切 archive.ubuntu.com：
+          # 它历史上从未退化、吞吐稳定，只要过阈值且比实际源快一倍即可；azure 曾于
+          # 2026-11-06 bulk 退化，仅作为 archive 也退化时的兜底。实际源健康则不动配置。
+          # CUR_HOST 识别失败时保持默认（安全降级）。
+          if [ "$CUR_SP" -ge "$THRESH" ]; then
+            echo "实际源吞吐正常（${CUR_SP} B/s），保持 runner 默认配置"
+          elif [ -z "$CUR_HOST" ]; then
+            echo "未识别实际源，跳过镜像切换（安全降级）"
+          elif [ "$ALT" -ge "$THRESH" ] && [ "$ALT" -ge $((CUR_SP * 2)) ]; then
+            echo "实际源退化，切换为 archive.ubuntu.com 优先"
             printf '%s\t%s\n' \
               'https://archive.ubuntu.com/ubuntu/' 'priority:1' \
               'https://security.ubuntu.com/ubuntu/' 'priority:2' \
               'http://azure.archive.ubuntu.com/ubuntu/' 'priority:3' \
               | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-            # 兼容未走 mirrorlist 的镜像：sources 里若硬编码 azure 也一并替换
-            sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' \
-              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-            # 换了源必须重新取索引，否则本步骤之后的 apt 仍按旧镜像的索引解析依赖
+            # 关键：sources 里硬编码的实际源 host 必须一并替换，否则 apt 仍走旧源。
+            # 覆盖 ec2 各区域与 azure，兼容 deb822 与经典 sources.list。
+            sudo sed -i -E \
+              -e 's#https?://[^ /[:space:]]*\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' \
+              -e 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list \
+              2>/dev/null || true
+            sudo -E apt -yqq update
+          elif [ "$AZ" -ge "$THRESH" ] && [ "$AZ" -ge "$CUR_SP" ]; then
+            echo "实际源退化，切换为 azure.archive.ubuntu.com 优先"
+            printf '%s\t%s\n' \
+              'http://azure.archive.ubuntu.com/ubuntu/' 'priority:1' \
+              'https://security.ubuntu.com/ubuntu/' 'priority:2' \
+              'https://archive.ubuntu.com/ubuntu/' 'priority:3' \
+              | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+            sudo sed -i -E \
+              -e 's#https?://[^ /[:space:]]*\.archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' \
+              -e 's#https?://archive\.ubuntu\.com/ubuntu#http://azure.archive.ubuntu.com/ubuntu#g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list \
+              2>/dev/null || true
             sudo -E apt -yqq update
           else
-            echo "镜像吞吐正常，保持 runner 默认镜像配置"
+            echo "所有候选源均退化，保持默认（安全降级）"
           fi
 
       - name: Initialization Environment
@@ -195,10 +235,15 @@ jobs:
           }
           apt_retry 300 purge firefox
           apt_retry 300 update
-          # 主机系统升级不是编译必需项：慢网络下允许更长耗时，失败也不阻塞后续流程，
-          # 只需修复可能被中断的 dpkg 状态即可。单次上限从 1800s 收到 600s：
-          # 有镜像切换兜底后，3 次重试最多 30 分钟，不再把整步骤的时间预算吃光。
-          if ! apt_retry 600 full-upgrade; then
+          # 主机系统升级不是编译必需项，失败也不阻塞后续流程，只需修复可能被中断的
+          # dpkg 状态。2026-11-18 事故：apt_retry 600s×3 在慢源下光这一步就烧掉
+          # 30 分钟（首轮即 600s 超时），把步骤 60 分钟预算吃光，必需的
+          # init_build_environment 反而没时间下载依赖。改为单次 300s：镜像已在上一
+          # 步按吞吐择优，full-upgrade 不该再独占重试预算。超时即放弃升级并修复 dpkg。
+          # sudo 在前，timeout 与 apt 同组，信号能命中 apt（原因见 apt_retry 注释）。
+          if ! sudo -E timeout --kill-after=30 300 apt -yqq \
+            -o Dpkg::Options::=--force-confdef \
+            -o Dpkg::Options::=--force-confold full-upgrade; then
             echo "系统升级失败或超时，修复 dpkg 状态后继续" >&2
             sudo -E dpkg --configure -a || true
             sudo -E apt -yqq -f install || true
