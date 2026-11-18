@@ -2,6 +2,19 @@
 
 本仓库的所有重要变更都会记录在此文件中。
 
+## [2026-11-18] 修复 CI 初始化阶段 60 分钟超时：apt 镜像探测对象错位
+
+### 背景
+
+- Run `44224956855` 中 `MEDIATEK-WIFI-YES · MT5700 / VIKINGYFY/immortalwrt · MT5700` 作业的 `Initialization Environment` 步骤 60 分钟超时，MT5700M 并行作业成功。
+- **根因**：`Select Apt Mirror` 只探测 `azure` 与 `archive` 两个「候选」，实测 azure=154 MB/s 便判定「保持默认」。但 apt 实际生效源是 `/etc/apt/sources.list.d/*.sources` 里硬编码的 `us-east-2.ec2.archive.ubuntu.com`（见 apt 输出 `Hit:2 ...`），该源从未被探测、bulk 仅约 200 kB/s（79 MB 包走 4 分钟）。上游 init 脚本需下 699 MB，被拖到步骤超时；`full-upgrade` 首轮 600s 超时进一步吃掉预算。
+
+### 改动
+
+- `.github/workflows/WRT-CORE.yml` → `Select Apt Mirror`：改为从 sources 配置解析「实际生效源」并探测其吞吐；健康线 1 MB/s（699 MB÷900s 需 ≥800 kB/s）；退化时优先切 `archive.ubuntu.com`（azure 兜底），并同步 sed 替换 sources 中硬编码的 ec2/azure host——旧补丁只改 `apt-mirrors.txt` 不足以生效；未识别源/全慢场景安全降级不改写。
+- `.github/workflows/WRT-CORE.yml` → `Initialization Environment`：`full-upgrade` 由 `apt_retry 600`（最多 30 分钟）改为单次 `timeout 300`，失败即修复 dpkg 继续，把步骤预算让给必需的依赖安装。
+- 校验：YAML 解析通过、两段 shell `bash -n` 通过、四种决策场景模拟符合预期（本次事故场景正确切 archive）。
+
 ## [2026-11-17] 固件版本标记扩展为结构化多字段
 
 ### 改动
