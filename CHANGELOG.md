@@ -27,6 +27,34 @@
 - 工作流 YAML 解析与内嵌 shell `bash -n` 通过；
 - 敏感信息扫描无命中。
 
+## [2026-11-21] 编译与清理顺序反转：先发布新固件，成功后再清理旧 Releases
+
+### 背景
+
+- 旧流程是 `Auto-Clean` 每天 05:00（CST）先清空全部 Releases，再通过 `workflow_run` 触发
+  `MTK-AUTO` 编译。
+- 一次完整编译通常需要 1~3 小时，这段时间 Releases 为空；如果当天编译失败，历史固件
+  已经被删除，无法回滚，也无法下载上一版应急。
+
+### 改动
+
+- `.github/workflows/MTK-AUTO.yml`：触发方式由 `workflow_run`（`Auto-Clean` 完成后）改为
+  每日 `schedule: 0 21 * * *`（05:00 CST）直接触发，保留手动 `workflow_dispatch`。
+- `.github/workflows/WRT-CORE.yml`：在 `Release Firmware` 之后新增 `Clean Old Releases`
+  步骤——仅当本次发布成功后，按 `<配置>-<owner>-<分支>-<模组>-` 前缀删除同组历史
+  Release 与 Tag，本次 Tag 始终保留；步骤带 `continue-on-error`，清理 API 抖动不会把
+  已成功的编译标红。
+- `.github/workflows/Auto-Clean.yml`：改为原生 `gh` 实现（移除
+  `ophub/delete-releases-workflows` 第三方依赖）。定时任务只清理 30 天以前的 Actions
+  运行记录，不再删除 Releases；手动触发新增 `clean_releases` 开关，并可选择每个分组
+  保留最新一个。
+- `README.md`、`index.html`：同步更新工作流调度机制与「先编译发布、后清理旧版」的说明。
+
+### 效果
+
+- 当天编译或发布失败时，上一版固件原样保留，不再出现「旧版已清空、新版又没编出来」的空窗；
+- 只有新固件成功发布后才淘汰同组旧版本，Releases 时间线与实际构建结果一致。
+
 ## [2026-11-18] 修复 CI 初始化阶段 60 分钟超时：apt 镜像探测对象错位
 
 ### 背景
