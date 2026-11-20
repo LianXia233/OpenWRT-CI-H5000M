@@ -108,6 +108,10 @@ MT5700M 模组的主控 AT 串口具有硬件独占性。**为杜绝多进程抢
 | **`Auto-Clean.yml`** | 每日定时 05:00 (CST) / 手动 | 定时仅轮换 30 天以前的 Actions 日志；手动触发可清理 Releases（可选每个分组保留最新一个） |
 | **`Cache-Clean.yml`** | 每周定时 / 手动 | 清理旧缓存快照，保留每个前缀最新一份，保证后续构建走增量编译 |
 
+> **CI 下载策略**：构建期的文件下载统一走 `.github/actions/fluxdown-download`（FluxDown CLI：
+> Range 探测分段、不支持时降为单连接、失败自动重试并校验尺寸/摘要）；`curl` 仅用于探测
+> （HEAD / Range / 清单）与安装 FluxDown CLI 本身。
+
 ### 固件命名规则
 
 Release 只发布可直接刷写的完整固件，统一按 `机型-模组插件-编译日期[-镜像类型].扩展名` 命名：
@@ -184,6 +188,7 @@ OpenWRT-CI-H5000M/
 │   ├── MTK-AUTO.yml          # 定时自动编译发版（固定并行产出双固件）
 │   ├── Auto-Clean.yml        # 日志轮换清理（旧 Release 在编译发布成功后清理）
 │   └── Cache-Clean.yml       # Actions 构建缓存回收
+├── .github/actions/fluxdown-download/action.yml  # FluxDown 大文件下载 composite action
 ├── Config/
 │   ├── GENERAL.txt           # 全局内核模块、网络协议栈与基础功能包
 │   ├── MEDIATEK-WIFI-YES.txt # Hiveton H5000M 硬件板级与 Wi-Fi 驱动配置
