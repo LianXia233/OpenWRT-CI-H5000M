@@ -4,11 +4,23 @@
 name: Auto-Clean
 
 on:
-  # 自动清理：每天 05:00 (CST) 在自动构建前执行，默认清理所有 Releases 及孤立 Tag
+  # 每日定时：只清理 30 天以前的 Actions 运行记录。
+  # Releases 不再在编译前清空 —— 旧版本的清理由 WRT-CORE 在
+  # 本次固件成功发布后按「同配置 + 同模组」分组执行，
+  # 编译失败时历史固件会原样保留。
   schedule:
     - cron: 0 21 * * *
-  # 手动清理（默认同样清理所有 Releases 及孤立 Tag）
+  # 手动清理（默认清理 Releases；可选每个分组保留最新一个）
   workflow_dispatch:
+    inputs:
+      clean_releases:
+        description: '清理 Releases（日常旧版本已由编译完成后自动清理，此处仅供手动维护）'
+        type: boolean
+        default: true
+      keep_latest_per_device:
+        description: '每个分组保留最新一个 Release（不勾选则清除 Releases 中的全部文件）'
+        type: boolean
+        default: false
 
 permissions: write-all
 
@@ -16,37 +28,95 @@ jobs:
   auto_clean:
     runs-on: ubuntu-26.04
     steps:
-      - name: Delete old Releases and Workflows
-        uses: ophub/delete-releases-workflows@main
-        with:
-          gh_token: ${{secrets.GITHUB_TOKEN}}
-          delete_releases: true
-          # 0 = 默认清理所有 Releases（不保留最新）
-          releases_keep_latest: 0
-          # 清理 Release 时一并删除其关联 Tag
-          delete_tags: true
-          delete_workflows: true
-          workflows_keep_day: 30
+      - name: 清理 Releases（仅手动触发）
+        if: github.event_name == 'workflow_dispatch' && inputs.clean_releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
 
-      - name: Delete orphaned Tags
-        # node24：actions/github-script@v7 运行在 Node 20 上
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const { owner, repo } = context.repo;
-            // 列出仓库内所有 Tag（分页）
-            let tags = [];
-            let page = 1;
-            while (true) {
-              const res = await github.rest.repos.listTags({ owner, repo, per_page: 100, page });
-              if (res.data.length === 0) break;
-              tags = tags.concat(res.data);
-              page++;
-            }
-            core.info(`Found ${tags.length} tag(s). Deleting all remaining (orphaned) tags...`);
-            for (const t of tags) {
-              await github.rest.git.deleteRef({ owner, repo, ref: `tags/${t.name}` });
-              core.info(`Deleted tag: ${t.name}`);
-            }
-            if (tags.length === 0) core.info('No tags to delete.');
+          REPO="${{ github.repository }}"
+          # 默认保留每个分组最新一个；取消勾选则清空全部
+          KEEP_LATEST="${{ inputs.keep_latest_per_device }}"
+          PER_PAGE=100
+          DELETED=0
+
+          echo ">>> 开始处理 Releases（KEEP_LATEST=${KEEP_LATEST}）"
+
+          # 1. 分页拉取全部非草稿 Release，按 published_at 降序暂存到临时文件
+          ALL=$(mktemp)
+          PAGE=1
+          while :; do
+            DATA=$(gh api "repos/${REPO}/releases?per_page=${PER_PAGE}&page=${PAGE}" \
+              --jq '[.[] | select(.draft==false)] | sort_by(.published_at) | reverse | .[] | "\(.id)\t\(.tag_name)"')
+            [ -z "${DATA}" ] && break
+            printf '%s\n' "${DATA}" >> "${ALL}"
+            PAGE=$((PAGE + 1))
+          done
+
+          TOTAL=$(wc -l < "${ALL}")
+          echo "Total non-draft releases: ${TOTAL}"
+
+          # 2. 若开启 keep_latest，计算每个分组需保留的最新 Release id
+          #    Tag 格式：<配置>-<owner>-<分支>-<模组>-<YY.MM.DD-HH.MM.SS>，
+          #    剥掉末尾时间戳后的整串即分组键（同配置同模组为一个组）。
+          #    日期段不匹配（非本流水线产物）时退化为整条 Tag 作键，
+          #    只会多保留、不会误删。
+          KEEP_IDS=""
+          if [ "${KEEP_LATEST}" = "true" ]; then
+            KEEP_IDS=$(awk -F'\t' '
+              {
+                t = $2
+                sub(/-[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]-[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]$/, "", t)
+                print t "\t" $1
+              }' "${ALL}" | awk -F'\t' '!seen[$1]++{print $2}')
+            echo "Keep-latest mode: keeping $(echo "${KEEP_IDS}" | wc -w | tr -d ' ') release(s)."
+          fi
+
+          # 3. 遍历并删除（keep_latest 模式下跳过需保留的）
+          while IFS=$'\t' read -r RID RTAG; do
+            [ -z "${RID}" ] && continue
+
+            if [ "${KEEP_LATEST}" = "true" ] && echo "${KEEP_IDS}" | grep -qx "${RID}"; then
+              echo "  [keep] ${RTAG} (id=${RID})"
+              continue
+            fi
+
+            echo "  [delete] ${RTAG} (id=${RID})"
+            # 删除 Release（同时会删除关联的 tag）
+            gh api "repos/${REPO}/releases/${RID}" -X DELETE --silent || true
+            # 二次确认：手动删除残留 tag（部分情况下 tag 不会随 release 自动删除）
+            gh api "repos/${REPO}/git/refs/tags/${RTAG}" -X DELETE --silent 2>/dev/null || true
+            DELETED=$((DELETED + 1))
+          done < "${ALL}"
+
+          rm -f "${ALL}"
+
+          if [ "${KEEP_LATEST}" = "true" ]; then
+            echo "=== Done: deleted ${DELETED} old release(s), kept $(echo "${KEEP_IDS}" | wc -w | tr -d ' ') latest ==="
+          else
+            echo "=== Done: deleted ${DELETED} release(s), Releases 已清空 ==="
+          fi
+
+      - name: 清理 30 天前的工作流运行记录
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+          echo "Deleting workflow runs older than ${CUTOFF_DATE}..."
+
+          WORKFLOWS=$(gh api "repos/${{ github.repository }}/actions/workflows" --jq '.workflows[].id')
+
+          for WF_ID in ${WORKFLOWS}; do
+            OLD_RUNS=$(gh api "repos/${{ github.repository }}/actions/workflows/${WF_ID}/runs?per_page=100&status=completed" \
+              --jq ".workflow_runs | map(select(.created_at < \"${CUTOFF_DATE}\")) | .[].id")
+
+            for RUN_ID in ${OLD_RUNS}; do
+              echo "  Deleting run ${RUN_ID}..."
+              gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}" -X DELETE --silent || true
+            done
+          done
+
+          echo "=== Workflow cleanup done ==="
