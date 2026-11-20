@@ -191,6 +191,18 @@ jobs:
             echo "所有候选源均退化，保持默认（安全降级）"
           fi
 
+      # 上游初始化脚本统一改由 FluxDown 下载（技能要求：CI 下载走 FluxDown，
+      # curl 仅用于探测与安装 CLI）。脚本约 12 KB，单连接即可。
+      - name: 下载 init_build_environment.sh（FluxDown）
+        # 脚本小、失败快；限时避免网络僵死拖到 job 级超时
+        timeout-minutes: 10
+        uses: ./.github/actions/fluxdown-download
+        with:
+          url: https://build-scripts.immortalwrt.org/init_build_environment.sh
+          output: init_build_environment.sh
+          segments: '1'
+          cache-dir: /tmp
+
       - name: Initialization Environment
         # 正常 5~6 分钟。上限 60 分钟：今天这种上游退化必须尽快失败并留下日志，
         # 而不是像以前那样烧掉 1.5~2.5 小时后连日志都取不到。
@@ -252,26 +264,17 @@ jobs:
           apt_retry 300 autoclean
           apt_retry 300 clean
           apt_retry 900 install dos2unix libfuse-dev gettext
-          # 官方初始化脚本同样加超时与重试（脚本内部有 apt update 步骤）。
+          # 官方初始化脚本由上一「FluxDown」步骤下载落盘，本步骤只负责执行重试。
           # 单次上限 900s（正常 5 分钟，3 倍余量）：3 次全部超时也才 45 分钟，
           # 仍在步骤 60 分钟上限之内，能带着日志失败而不是被环境回收。
-          #
-          # 先落盘再执行，不再用 `bash <(curl ...)`：curl 卡住或证书失败时，进程
-          # 替换喂给 bash 的是空内容，bash 会以 0 退出，这一步反而「成功」，
-          # 缺依赖要到几小时后的编译阶段才暴露。落盘后能校验字节数并对下载本身设超时。
           INIT_OK=0
           for i in 1 2 3; do
-            if [ ! -s /tmp/init_build_environment.sh ]; then
-              if ! curl -fsSL --retry 3 --connect-timeout 30 --max-time 120 \
-                -o /tmp/init_build_environment.sh \
-                https://build-scripts.immortalwrt.org/init_build_environment.sh; then
-                echo "init_build_environment.sh 下载失败（第 ${i} 次）" >&2
-                rm -f /tmp/init_build_environment.sh
-                sleep 10
-                continue
-              fi
-              wc -c /tmp/init_build_environment.sh
-            fi
+            # 下载已由上一「FluxDown」步骤完成，这里只复核文件非空。
+            [ -s /tmp/init_build_environment.sh ] || {
+              echo "::error::init_build_environment.sh 缺失或为空" >&2
+              exit 1
+            }
+            wc -c /tmp/init_build_environment.sh
             # 上游 check_system() 的代号白名单只到 noble，26.04 会直接 exit 1；
             # 注入兼容补丁，把脚本内代号映射为已验证的 noble 参数集（补丁幂等）。
             python3 "$GITHUB_WORKSPACE/.github/scripts/patch-init-env.py"
@@ -831,11 +834,8 @@ jobs:
           # stable 并固定 RUSTUP_TOOLCHAIN，保证 rustc 版本与缓存键一致。
           export PATH="$HOME/.cargo/bin:$PATH"
           if ! command -v rustup >/dev/null 2>&1; then
-            # 先落盘再执行：curl 管道喂 sh 时，curl 挂死或失败会让 sh 读到空内容
-            # 并以 0 退出，缺工具链要到几小时后才暴露。
-            curl -sSf --retry 3 --connect-timeout 30 --max-time 120 \
-              https://sh.rustup.rs -o /tmp/rustup-init.sh
-            sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable --no-modify-path
+            # rustup-init 由 FluxDown 下载并校验（见 .github/scripts/install-rustup.sh）
+            bash "$GITHUB_WORKSPACE/.github/scripts/install-rustup.sh"
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           # 工具链与目标 std 一次装齐：分两步会多一轮索引解析与网络往返；
